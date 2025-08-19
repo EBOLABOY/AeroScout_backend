@@ -87,25 +87,25 @@ Redis (Port 6379)
 
 ```bash
 # 查看服务状态
-docker-compose ps
+docker compose ps
 
 # 查看日志
-docker-compose logs -f
-docker-compose logs -f app    # 只看应用日志
-docker-compose logs -f nginx  # 只看 nginx 日志
+docker compose logs -f
+docker compose logs -f app    # 只看应用日志
+docker compose logs -f nginx  # 只看 nginx 日志
 
 # 重启服务
-docker-compose restart
-docker-compose restart app    # 只重启应用
+docker compose restart
+docker compose restart app    # 只重启应用
 
 # 停止服务
-docker-compose stop
+docker compose stop
 
 # 启动服务
-docker-compose start
+docker compose start
 
 # 完全停止并删除容器
-docker-compose down
+docker compose down
 ```
 
 ### 更新部署
@@ -115,7 +115,7 @@ docker-compose down
 git pull
 
 # 重新构建并部署
-docker-compose up -d --build
+docker compose up -d --build
 
 # 或使用部署脚本
 ./deploy.sh
@@ -125,11 +125,11 @@ docker-compose up -d --build
 
 ```bash
 # 备份 Redis 数据
-docker-compose exec redis redis-cli BGSAVE
+docker compose exec redis redis-cli BGSAVE
 docker cp ticketradar-redis:/data/dump.rdb ./backup/
 
 # 查看 Redis 状态
-docker-compose exec redis redis-cli info
+docker compose exec redis redis-cli info
 ```
 
 ## 🔐 SSL 证书管理
@@ -162,7 +162,7 @@ openssl x509 -in ssl/fullchain.pem -noout -dates
 
 - **应用日志**: `logs/`
 - **Nginx 日志**: `logs/nginx/`
-- **Docker 日志**: `docker-compose logs`
+- **Docker 日志**: `docker compose logs`
 
 ### 健康检查
 
@@ -171,7 +171,7 @@ openssl x509 -in ssl/fullchain.pem -noout -dates
 curl https://api.ticketradar.izlx.de/health
 
 # 检查各服务状态
-docker-compose ps
+docker compose ps
 ```
 
 ### 性能监控
@@ -181,7 +181,7 @@ docker-compose ps
 docker stats
 
 # 查看 Redis 内存使用
-docker-compose exec redis redis-cli info memory
+docker compose exec redis redis-cli info memory
 ```
 
 ## 🛠️ 故障排除
@@ -197,31 +197,31 @@ docker-compose exec redis redis-cli info memory
 2. **SSL 证书获取失败**
    - 检查域名解析: `nslookup api.ticketradar.izlx.de`
    - 检查防火墙: `sudo ufw status`
-   - 查看 certbot 日志: `docker-compose -f docker-compose.ssl.yml logs certbot`
+   - 查看 certbot 日志: `docker compose -f docker-compose.ssl.yml logs certbot`
 
 3. **应用启动失败**
    ```bash
    # 查看详细日志
-   docker-compose logs app
-   
+   docker compose logs app
+
    # 检查配置
-   docker-compose config
+   docker compose config
    ```
 
 4. **Redis 连接失败**
    ```bash
    # 检查 Redis 状态
-   docker-compose exec redis redis-cli ping
-   
+   docker compose exec redis redis-cli ping
+
    # 查看 Redis 日志
-   docker-compose logs redis
+   docker compose logs redis
    ```
 
 ### 重置部署
 
 ```bash
 # 完全清理并重新部署
-docker-compose down -v
+docker compose down -v
 docker system prune -f
 ./deploy.sh
 ```
@@ -242,8 +242,8 @@ docker system prune -f
    sudo apt update && sudo apt upgrade -y
    
    # 更新 Docker 镜像
-   docker-compose pull
-   docker-compose up -d
+   docker compose pull
+   docker compose up -d
    ```
 
 3. **备份策略**
@@ -254,6 +254,6 @@ docker system prune -f
 ## 📞 支持
 
 如有问题，请查看：
-- 应用日志: `docker-compose logs app`
-- Nginx 日志: `docker-compose logs nginx`
+- 应用日志: `docker compose logs app`
+- Nginx 日志: `docker compose logs nginx`
 - 系统日志: `journalctl -u docker`

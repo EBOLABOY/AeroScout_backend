@@ -144,7 +144,7 @@ backup_data() {
     
     # 备份 Redis 数据
     print_info "备份 Redis 数据..."
-    docker-compose exec -T redis redis-cli BGSAVE
+    docker compose exec -T redis redis-cli BGSAVE
     sleep 2
     docker cp ticketradar-redis:/data/dump.rdb "$BACKUP_DIR/"
     
@@ -169,7 +169,7 @@ health_check() {
     
     # 检查容器状态
     print_info "检查容器状态..."
-    docker-compose ps
+    docker compose ps
     
     # 检查应用健康端点
     print_info "检查应用健康端点..."
@@ -181,7 +181,7 @@ health_check() {
     
     # 检查 Redis 连接
     print_info "检查 Redis 连接..."
-    if docker-compose exec -T redis redis-cli ping | grep -q PONG; then
+    if docker compose exec -T redis redis-cli ping | grep -q PONG; then
         print_success "Redis 连接正常"
     else
         print_error "Redis 连接失败"
@@ -216,11 +216,11 @@ enter_shell() {
     case $1 in
         "app")
             print_info "进入应用容器..."
-            docker-compose exec app bash
+            docker compose exec app bash
             ;;
         "redis")
             print_info "进入 Redis 容器..."
-            docker-compose exec redis redis-cli
+            docker compose exec redis redis-cli
             ;;
         *)
             print_error "未知的容器类型: $1"
