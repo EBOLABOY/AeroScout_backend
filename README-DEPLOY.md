@@ -50,18 +50,20 @@ chmod +x deploy.sh setup-ssl.sh
 ./deploy.sh
 ```
 
-### 3. 配置 HTTPS (推荐)
+### 3. SSL 证书配置
 
-```bash
-# 修改 setup-ssl.sh 中的邮箱地址
-nano setup-ssl.sh
+本项目使用 **Cloudflare Origin 证书**，证书文件已包含在代码中。
 
-# 配置 SSL 证书
-./setup-ssl.sh
+**Cloudflare 配置要求：**
+- DNS 记录：橙色云朵（Proxied 状态）
+- SSL/TLS 模式：**完全（严格）**
+- 证书有效期：至 2040年8月15日
 
-# 重新部署启用 HTTPS
-./deploy.sh
-```
+**如需更新证书：**
+1. 登录 Cloudflare 控制台
+2. 进入 SSL/TLS → Origin Server
+3. 生成新的 Origin 证书
+4. 替换 `ssl/fullchain.pem` 和 `ssl/privkey.pem`
 
 ## 📋 服务架构
 
@@ -134,17 +136,14 @@ docker compose exec redis redis-cli info
 
 ## 🔐 SSL 证书管理
 
-### 自动续期
+### Cloudflare Origin 证书
 
-```bash
-# 手动续期
-./renew-ssl.sh
+本项目使用 Cloudflare Origin 证书，**无需自动续期**。
 
-# 设置自动续期 (crontab)
-crontab -e
-# 添加以下行 (每天凌晨3点检查续期)
-0 3 * * * /path/to/your/project/renew-ssl.sh >> /var/log/ssl-renew.log 2>&1
-```
+**证书特点：**
+- 有效期：15年（至2040年8月15日）
+- 自动信任：由 Cloudflare 签发
+- 安全性：仅用于 Cloudflare 到源服务器的连接
 
 ### 证书信息查看
 
@@ -154,6 +153,21 @@ openssl x509 -in ssl/fullchain.pem -text -noout
 
 # 查看证书过期时间
 openssl x509 -in ssl/fullchain.pem -noout -dates
+
+# 验证证书
+openssl verify ssl/fullchain.pem
+```
+
+### 证书更新（如需要）
+
+```bash
+# 1. 在 Cloudflare 控制台生成新证书
+# 2. 替换证书文件
+cp new-fullchain.pem ssl/fullchain.pem
+cp new-privkey.pem ssl/privkey.pem
+
+# 3. 重新部署
+docker compose restart nginx
 ```
 
 ## 📊 监控和日志
