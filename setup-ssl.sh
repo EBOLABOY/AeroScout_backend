@@ -6,7 +6,7 @@
 set -e
 
 DOMAIN="api.ticketradar.izlx.de"
-EMAIL="your-email@example.com"  # 请修改为你的邮箱
+EMAIL="q1242772513@gmail.com"  # Let's Encrypt 通知邮箱
 
 echo "🔐 开始配置 SSL 证书..."
 
