@@ -1,0 +1,36 @@
+# Core web framework
+fastapi==0.115.14
+uvicorn==0.35.0
+starlette==0.46.2
+
+# Data validation
+pydantic==2.11.7
+pydantic-settings==2.1.0
+email_validator==2.2.0
+
+# Database & Storage
+supabase==2.16.0
+
+# Caching
+redis==6.2.0
+
+# Authentication & Security
+PyJWT==2.10.1
+passlib==1.7.4
+bcrypt==4.3.0
+
+# HTTP clients
+aiohttp==3.12.13
+requests==2.32.4
+
+# Flight services
+smart-flights==7.0.0
+
+# AI services - using OpenAI-compatible third-party Gemini API
+# google-generativeai not needed as we use OpenAI format API
+
+# Utilities
+loguru==0.7.2
+python-dotenv==1.1.1
+python-multipart==0.0.20
+psutil==7.0.0
