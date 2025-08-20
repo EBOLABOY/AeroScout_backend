@@ -128,13 +128,14 @@ def create_fastapi_app() -> FastAPI:
         debug=is_debug_mode
     )
     
-    # 配置CORS
+    # 配置CORS（支持SSE）
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["*"],  # 支持SSE所需的头部
     )
     
     # 配置受信任主机

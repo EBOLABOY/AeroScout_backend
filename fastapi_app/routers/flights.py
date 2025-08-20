@@ -2,9 +2,13 @@
 FastAPI航班路由
 """
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+import json
+import uuid
+from datetime import datetime, timedelta
+from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from loguru import logger
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
 
 from fastapi_app.models.common import APIResponse
@@ -950,3 +954,221 @@ async def _execute_ai_search_background(task_id: str, search_params: Dict[str, A
             message="搜索失败",
             error=str(e)
         )
+
+
+# ==================== SSE 实时推送端点 ====================
+
+@router.get("/task/{task_id}/stream")
+async def stream_task_status(
+    task_id: str,
+    current_user: Optional[UserInfo] = Depends(get_current_user_optional)
+):
+    """
+    SSE实时推送任务状态
+    支持游客访问，实时推送任务进度和结果
+    """
+
+    async def generate_sse_stream():
+        """生成SSE数据流"""
+        try:
+            logger.info(f"🔄 开始SSE推送任务状态: {task_id}")
+
+            # 检查任务是否存在
+            task_info = await async_task_service.get_task_info(task_id)
+            if not task_info:
+                # 发送错误事件
+                error_data = {
+                    "status": "ERROR",
+                    "message": "任务不存在",
+                    "error_code": "TASK_NOT_FOUND"
+                }
+                yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                return
+
+            # 检查任务所有权（游客可访问）
+            if current_user and task_info.get("user_id") != current_user.id:
+                if task_info.get("user_id") != "guest":
+                    error_data = {
+                        "status": "ERROR",
+                        "message": "无权访问此任务",
+                        "error_code": "ACCESS_DENIED"
+                    }
+                    yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                    return
+
+            # 发送初始状态
+            initial_status = task_info.get("status", "PENDING")
+            initial_data = {
+                "status": initial_status,
+                "progress": task_info.get("progress", 0),
+                "message": task_info.get("message", ""),
+                "task_id": task_id,
+                "created_at": task_info.get("created_at"),
+                "updated_at": task_info.get("updated_at")
+            }
+
+            logger.info(f"📤 SSE发送初始状态: {task_id} -> {initial_status}")
+            yield f"data: {json.dumps(initial_data, ensure_ascii=False)}\n\n"
+
+            # 如果任务已完成，发送结果并结束
+            if initial_status == "COMPLETED":
+                try:
+                    result = await async_task_service.get_task_result(task_id)
+                    if result:
+                        result_data = {
+                            "status": "COMPLETED",
+                            "progress": 100,
+                            "message": "任务完成",
+                            "task_id": task_id,
+                            "result": result
+                        }
+                        logger.info(f"📤 SSE发送完成结果: {task_id}")
+                        yield f"data: {json.dumps(result_data, ensure_ascii=False)}\n\n"
+                except Exception as e:
+                    logger.error(f"❌ SSE获取任务结果失败: {e}")
+
+                # 发送结束事件
+                yield f"event: close\ndata: {json.dumps({'message': '任务已完成'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 如果任务失败，发送错误并结束
+            if initial_status == "FAILED":
+                error_data = {
+                    "status": "FAILED",
+                    "progress": 0,
+                    "message": task_info.get("message", "任务失败"),
+                    "task_id": task_id,
+                    "error": task_info.get("error", "未知错误")
+                }
+                logger.info(f"📤 SSE发送失败状态: {task_id}")
+                yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                yield f"event: close\ndata: {json.dumps({'message': '任务已失败'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 轮询任务状态变化
+            last_status = initial_status
+            last_progress = task_info.get("progress", 0)
+            last_updated = task_info.get("updated_at")
+
+            max_wait_time = 300  # 最大等待5分钟
+            start_time = datetime.now()
+
+            while True:
+                try:
+                    # 检查超时
+                    if (datetime.now() - start_time).total_seconds() > max_wait_time:
+                        timeout_data = {
+                            "status": "TIMEOUT",
+                            "message": "任务超时",
+                            "task_id": task_id
+                        }
+                        yield f"data: {json.dumps(timeout_data, ensure_ascii=False)}\n\n"
+                        yield f"event: close\ndata: {json.dumps({'message': '任务超时'}, ensure_ascii=False)}\n\n"
+                        break
+
+                    # 获取最新任务状态
+                    current_task_info = await async_task_service.get_task_info(task_id)
+                    if not current_task_info:
+                        break
+
+                    current_status = current_task_info.get("status", "PENDING")
+                    current_progress = current_task_info.get("progress", 0)
+                    current_updated = current_task_info.get("updated_at")
+                    current_message = current_task_info.get("message", "")
+
+                    # 检查是否有状态变化
+                    status_changed = (
+                        current_status != last_status or
+                        current_progress != last_progress or
+                        current_updated != last_updated
+                    )
+
+                    if status_changed:
+                        # 发送状态更新
+                        update_data = {
+                            "status": current_status,
+                            "progress": current_progress,
+                            "message": current_message,
+                            "task_id": task_id,
+                            "updated_at": current_updated
+                        }
+
+                        logger.info(f"📤 SSE发送状态更新: {task_id} -> {current_status} ({current_progress}%)")
+                        yield f"data: {json.dumps(update_data, ensure_ascii=False)}\n\n"
+
+                        # 更新记录的状态
+                        last_status = current_status
+                        last_progress = current_progress
+                        last_updated = current_updated
+
+                    # 如果任务完成，发送结果并结束
+                    if current_status == "COMPLETED":
+                        try:
+                            result = await async_task_service.get_task_result(task_id)
+                            if result:
+                                result_data = {
+                                    "status": "COMPLETED",
+                                    "progress": 100,
+                                    "message": "任务完成",
+                                    "task_id": task_id,
+                                    "result": result
+                                }
+                                logger.info(f"📤 SSE发送最终结果: {task_id}")
+                                yield f"data: {json.dumps(result_data, ensure_ascii=False)}\n\n"
+                        except Exception as e:
+                            logger.error(f"❌ SSE获取最终结果失败: {e}")
+
+                        # 发送结束事件
+                        yield f"event: close\ndata: {json.dumps({'message': '任务完成'}, ensure_ascii=False)}\n\n"
+                        break
+
+                    # 如果任务失败，发送错误并结束
+                    if current_status == "FAILED":
+                        error_data = {
+                            "status": "FAILED",
+                            "progress": 0,
+                            "message": current_message,
+                            "task_id": task_id,
+                            "error": current_task_info.get("error", "未知错误")
+                        }
+                        logger.info(f"📤 SSE发送失败结果: {task_id}")
+                        yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                        yield f"event: close\ndata: {json.dumps({'message': '任务失败'}, ensure_ascii=False)}\n\n"
+                        break
+
+                    # 等待2秒后再次检查
+                    await asyncio.sleep(2)
+
+                except Exception as e:
+                    logger.error(f"❌ SSE轮询过程中出错: {e}")
+                    error_data = {
+                        "status": "ERROR",
+                        "message": f"推送过程中出错: {str(e)}",
+                        "task_id": task_id
+                    }
+                    yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                    break
+
+            logger.info(f"🔚 SSE推送结束: {task_id}")
+
+        except Exception as e:
+            logger.error(f"❌ SSE流生成失败: {e}")
+            error_data = {
+                "status": "ERROR",
+                "message": f"服务器内部错误: {str(e)}",
+                "task_id": task_id
+            }
+            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+
+    # 返回SSE响应
+    return StreamingResponse(
+        generate_sse_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Expose-Headers": "*",
+        }
+    )
