@@ -1612,6 +1612,60 @@ You must strictly follow this key principle: The most successful Skiplagging opp
             traceback.print_exc()
             return None
 
+    def _generate_fallback_report(self, google_flights, kiwi_flights, ai_flights, departure_code, destination_code, user_preferences):
+        """生成降级报告，当AI处理失败时使用"""
+        try:
+            # 合并所有航班数据
+            all_flights = []
+            if google_flights:
+                all_flights.extend(google_flights)
+            if kiwi_flights:
+                all_flights.extend(kiwi_flights)
+            if ai_flights:
+                all_flights.extend(ai_flights)
+
+            # 基础统计
+            total_flights = len(all_flights)
+
+            # 简单的价格分析
+            prices = []
+            for flight in all_flights:
+                if flight.get('price') and flight['price'].get('amount'):
+                    prices.append(flight['price']['amount'])
+
+            min_price = min(prices) if prices else 0
+            avg_price = sum(prices) / len(prices) if prices else 0
+
+            # 生成基础报告
+            report = f"""# 航班搜索结果
+
+## 搜索信息
+- 出发地: {departure_code}
+- 目的地: {destination_code}
+- 用户偏好: {user_preferences or '无特殊要求'}
+
+## 搜索结果统计
+- 找到航班: {total_flights} 个
+- 最低价格: ¥{min_price:,.0f}
+- 平均价格: ¥{avg_price:,.0f}
+
+## 说明
+由于AI服务暂时不可用，此报告为基础分析结果。
+建议稍后重试以获得更详细的AI分析和推荐。
+"""
+
+            return report
+
+        except Exception as e:
+            logger.error(f"生成降级报告失败: {e}")
+            return f"""# 航班搜索结果
+
+搜索完成，但AI分析服务暂时不可用。
+找到 {len(google_flights or []) + len(kiwi_flights or []) + len(ai_flights or [])} 个航班结果。
+
+请稍后重试以获得详细的AI分析和推荐。
+"""
+
     async def _call_ai_api(self, prompt: str, model_name: str = None, language: str = "zh", enable_fallback: bool = True) -> Optional[Dict]:
         """调用AI API进行数据处理，支持模型降级"""
 
