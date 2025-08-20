@@ -1329,23 +1329,17 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 if processed_data.get('summary', {}).get('markdown_format'):
                     logger.info(f"✅ AI Markdown分析报告生成成功")
                     logger.info(f"📊 处理了 {len(google_flights) + len(kiwi_flights) + len(ai_flights)} 个原始航班，生成智能分析报告")
-                    # 合并所有原始航班数据
-                    all_flights = []
-                    if google_flights:
-                        all_flights.extend(google_flights)
-                    if kiwi_flights:
-                        all_flights.extend(kiwi_flights)
-                    if ai_flights:
-                        all_flights.extend(ai_flights)
 
-                    logger.info(f"📊 返回 {len(all_flights)} 个原始航班数据")
+                    # 只返回AI分析报告，不返回航班数据
+                    ai_report = processed_data.get('ai_analysis_report', '')
+                    logger.info(f"📊 返回AI分析报告，长度: {len(ai_report)} 字符")
 
                     return {
                         'success': True,
-                        'flights': all_flights,  # 返回所有航班数据
+                        'flights': [],  # 不返回航班数据，只返回AI报告
                         'summary': processed_data.get('summary', {}),
-                        'ai_analysis_report': processed_data.get('ai_analysis_report', ''),
-                        'total_count': len(all_flights),
+                        'ai_analysis_report': ai_report,
+                        'total_count': 0,  # 不返回航班数据
                         'processing_info': {
                             'source_counts': {
                                 'regular_search': len(google_flights),
@@ -1356,7 +1350,8 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                             'language': language,
                             'processor': 'ai_markdown',
                             'user_preferences': user_preferences,
-                            'format': 'markdown'
+                            'format': 'markdown',
+                            'report_only': True  # 标记只返回报告
                         }
                     }
                 else:
@@ -1408,6 +1403,11 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                         logger.info(f"📊 降级处理：添加 {len(ai_flights)} 个AI推荐航班")
 
                     # 生成基本的分析报告
+                    search_params = {
+                        'departure_code': departure_code,
+                        'destination_code': destination_code,
+                        'language': language
+                    }
                     fallback_report = self._generate_fallback_analysis_report(
                         all_flights, search_params, user_preferences
                     )
