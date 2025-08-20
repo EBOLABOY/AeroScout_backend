@@ -1018,27 +1018,17 @@ async def stream_task_status(
                 try:
                     result = await async_task_service.get_task_result(task_id)
                     if result:
-                        # 转换数据结构以匹配前端期望
-                        transformed_result = {
+                        # 简化：直接发送后端原始数据结构，让前端处理
+                        result_data = {
                             "status": "COMPLETED",
                             "progress": 100,
                             "message": "任务完成",
                             "task_id": task_id,
-                            # 直接传递结果数据，让前端的useSSESearch处理结构转换
-                            "result": result,
-                            # 同时提供前端期望的字段
-                            "data": {
-                                "itineraries": result.get("flights", [])
-                            },
-                            "ai_analysis_report": result.get("ai_analysis_report", ""),
-                            "flights": result.get("flights", []),
-                            "total_count": result.get("total_count", 0),
-                            "ai_processing": result.get("ai_processing", {}),
-                            "search_stages": result.get("search_stages", {})
+                            "result": result  # 直接发送原始结果，让前端处理数据结构
                         }
                         logger.info(f"📤 SSE发送完成结果: {task_id}")
                         logger.info(f"📊 结果包含: {len(result.get('flights', []))} 个航班, AI报告长度: {len(result.get('ai_analysis_report', ''))}")
-                        yield f"data: {json.dumps(transformed_result, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps(result_data, ensure_ascii=False)}\n\n"
                 except Exception as e:
                     logger.error(f"❌ SSE获取任务结果失败: {e}")
 
@@ -1121,28 +1111,17 @@ async def stream_task_status(
                         try:
                             result = await async_task_service.get_task_result(task_id)
                             if result:
-                                # 转换数据结构以匹配前端期望
-                                # 前端期望: { data: { itineraries: [...] }, ai_analysis_report: "..." }
-                                transformed_result = {
+                                # 简化：直接发送后端原始数据结构，让前端处理
+                                result_data = {
                                     "status": "COMPLETED",
                                     "progress": 100,
                                     "message": "任务完成",
                                     "task_id": task_id,
-                                    # 直接传递结果数据，让前端的useSSESearch处理结构转换
-                                    "result": result,
-                                    # 同时提供前端期望的字段
-                                    "data": {
-                                        "itineraries": result.get("flights", [])
-                                    },
-                                    "ai_analysis_report": result.get("ai_analysis_report", ""),
-                                    "flights": result.get("flights", []),
-                                    "total_count": result.get("total_count", 0),
-                                    "ai_processing": result.get("ai_processing", {}),
-                                    "search_stages": result.get("search_stages", {})
+                                    "result": result  # 直接发送原始结果，让前端处理数据结构
                                 }
                                 logger.info(f"📤 SSE发送最终结果: {task_id}")
                                 logger.info(f"📊 结果包含: {len(result.get('flights', []))} 个航班, AI报告长度: {len(result.get('ai_analysis_report', ''))}")
-                                yield f"data: {json.dumps(transformed_result, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps(result_data, ensure_ascii=False)}\n\n"
                         except Exception as e:
                             logger.error(f"❌ SSE获取最终结果失败: {e}")
 
