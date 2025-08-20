@@ -67,7 +67,7 @@ class AsyncTaskService:
         task_info = {
             "task_id": task_id,
             "task_type": task_type,
-            "status": TaskStatus.PENDING,
+            "status": TaskStatus.PENDING.value,  # 确保保存为字符串
             "created_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
             "user_id": user_id,
@@ -87,7 +87,7 @@ class AsyncTaskService:
         # 存储任务状态
         await self.cache_service.set(
             self._get_task_key(task_id, "status"),
-            TaskStatus.PENDING,
+            TaskStatus.PENDING.value,  # 确保保存为字符串
             expire=self.default_ttl
         )
         
@@ -124,7 +124,7 @@ class AsyncTaskService:
                 return False
             
             # 更新任务信息
-            task_info["status"] = status
+            task_info["status"] = status.value  # 确保保存为字符串
             task_info["updated_at"] = datetime.now().isoformat()
             
             if progress is not None:
@@ -146,7 +146,7 @@ class AsyncTaskService:
             # 更新状态
             await self.cache_service.set(
                 self._get_task_key(task_id, "status"),
-                status,
+                status.value,  # 确保保存为字符串
                 expire=self.default_ttl
             )
             

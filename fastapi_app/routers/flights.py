@@ -761,26 +761,38 @@ async def get_task_status(
 
         # 获取任务信息
         task_info = await async_task_service.get_task_info(task_id)
+        logger.info(f"🔍 查询任务信息: {task_id}, 结果: {task_info}")
 
         if not task_info:
+            logger.warning(f"❌ 任务不存在: {task_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="任务不存在"
             )
 
         # 检查任务所有权（可选）
-        if task_info.get("user_id") != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="无权访问此任务"
-            )
+        # 对于游客用户，跳过权限检查
+        if current_user and task_info.get("user_id") != current_user.id:
+            # 如果是游客任务，允许访问
+            if task_info.get("user_id") != "guest":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="无权访问此任务"
+                )
+
+        # 确保状态正确序列化
+        status_value = task_info["status"]
+        if hasattr(status_value, 'value'):
+            status_value = status_value.value
+
+        logger.info(f"📊 返回任务状态: {task_id} -> {status_value}")
 
         return APIResponse(
             success=True,
             message="任务状态获取成功",
             data={
                 "task_id": task_id,
-                "status": task_info["status"],
+                "status": status_value,
                 "progress": task_info.get("progress", 0),
                 "message": task_info.get("message", ""),
                 "created_at": task_info["created_at"],
@@ -802,7 +814,7 @@ async def get_task_status(
 @router.get("/task/{task_id}/result", response_model=APIResponse)
 async def get_task_result(
     task_id: str,
-    current_user: UserInfo = Depends(get_current_active_user)
+    current_user: Optional[UserInfo] = Depends(get_current_user_optional)
 ):
     """
     获取异步任务结果
@@ -820,15 +832,18 @@ async def get_task_result(
                 detail="任务不存在"
             )
 
-        # 检查任务所有权
-        if task_info.get("user_id") != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="无权访问此任务"
-            )
+        # 检查任务所有权（可选）
+        # 对于游客用户，跳过权限检查
+        if current_user and task_info.get("user_id") != current_user.id:
+            # 如果是游客任务，允许访问
+            if task_info.get("user_id") != "guest":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="无权访问此任务"
+                )
 
         # 检查任务状态
-        if task_info["status"] != TaskStatus.COMPLETED:
+        if task_info["status"] != TaskStatus.COMPLETED.value:
             return APIResponse(
                 success=False,
                 message=f"任务尚未完成，当前状态: {task_info['status']}",
