@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # SSL 证书配置脚本 (Cloudflare Origin 证书)
-# 域名: api.ticketradar.izlx.de
+# 域名: apiticketradar.izlx.de
 
 set -e
 
-DOMAIN="api.ticketradar.izlx.de"
+DOMAIN="apiticketradar.izlx.de"
 
 echo "🔐 Cloudflare Origin SSL 证书配置"
 echo ""

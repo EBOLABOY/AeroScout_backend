@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # TicketRadar Docker 部署脚本
-# 域名: https://api.ticketradar.izlx.de/
+# 域名: https://apiticketradar.izlx.de/
 
 set -e
 
@@ -63,7 +63,7 @@ for i in {1..10}; do
 done
 
 echo "🎉 部署完成！"
-echo "📍 访问地址: https://api.ticketradar.izlx.de"
+echo "📍 访问地址: https://apiticketradar.izlx.de"
 echo "🔒 SSL证书: Cloudflare Origin 证书"
 echo "📊 查看日志: docker compose logs -f"
 echo "🔧 管理服务: docker compose [start|stop|restart]"
