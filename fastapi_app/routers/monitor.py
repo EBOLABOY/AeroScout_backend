@@ -535,13 +535,14 @@ async def execute_monitor_task(
 
 @router.get("/cities", response_model=APIResponse)
 async def get_monitor_cities(
-    current_user: UserInfo = Depends(get_current_active_user)
+    current_user: Optional[UserInfo] = Depends(optional_auth)
 ):
     """
-    获取监控页面支持的城市列表 (需要认证)
+    获取监控页面支持的城市列表 (允许游客访问)
     """
     try:
-        logger.info(f"用户 {current_user.username} 获取监控城市列表")
+        user_info = f"用户 {current_user.username}" if current_user else "游客"
+        logger.info(f"{user_info} 获取监控城市列表")
 
         # 支持的城市列表
         cities = [
@@ -591,13 +592,14 @@ async def get_monitor_cities(
 
 @router.get("/dates", response_model=APIResponse)
 async def get_monitor_dates(
-    current_user: UserInfo = Depends(get_current_active_user)
+    current_user: Optional[UserInfo] = Depends(optional_auth)
 ):
     """
-    获取监控日期设置 (需要认证)
+    获取监控日期设置 (允许游客访问)
     """
     try:
-        logger.info(f"用户 {current_user.username} 获取监控日期设置")
+        user_info = f"用户 {current_user.username}" if current_user else "游客"
+        logger.info(f"{user_info} 获取监控日期设置")
 
         import os
         from datetime import datetime, timedelta
@@ -644,14 +646,15 @@ async def get_monitor_dates(
 @router.post("/refresh", response_model=APIResponse)
 async def refresh_monitor_data(
     request_data: dict,
-    current_user: UserInfo = Depends(get_current_active_user)
+    current_user: Optional[UserInfo] = Depends(optional_auth)
 ):
     """
-    刷新监控数据 (需要认证)
+    刷新监控数据 (允许游客访问)
     """
     try:
         city = request_data.get('city', 'HKG').upper()
-        logger.info(f"用户 {current_user.username} 刷新监控数据: {city}")
+        user_info = f"用户 {current_user.username}" if current_user else "游客"
+        logger.info(f"{user_info} 刷新监控数据: {city}")
 
         # 验证城市代码
         supported_cities = ['HKG', 'SZX', 'CAN', 'MFM']
@@ -706,15 +709,16 @@ async def get_monitor_data(
     blacklist_countries: Optional[str] = Query(None, description="黑名单国家，逗号分隔"),
     depart_date: Optional[str] = Query(None, description="出发日期(YYYY-MM-DD)"),
     return_date: Optional[str] = Query(None, description="返程日期(YYYY-MM-DD)"),
-    current_user: UserInfo = Depends(get_current_active_user)
+    current_user: Optional[UserInfo] = Depends(optional_auth)
 ):
     """
-    获取监控页面数据 (需要认证)
+    获取监控页面数据 (允许游客访问)
 
     支持的城市代码: HKG, SZX, CAN, MFM, BJS, SHA, TSN, TYO, SEL, TPE
     """
     try:
-        logger.info(f"用户 {current_user.username} 获取监控数据: {city}")
+        user_info = f"用户 {current_user.username}" if current_user else "游客"
+        logger.info(f"{user_info} 获取监控数据: {city}")
 
         # 验证城市代码 - 支持前端表单中的所有城市
         supported_cities = ['HKG', 'SZX', 'CAN', 'MFM', 'BJS', 'SHA', 'TSN', 'TYO', 'SEL', 'TPE']
