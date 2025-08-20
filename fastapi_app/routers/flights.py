@@ -976,13 +976,16 @@ async def stream_task_status(
             # 检查任务是否存在
             task_info = await async_task_service.get_task_info(task_id)
             if not task_info:
-                # 发送错误事件
+                # 发送错误事件并立即关闭连接
                 error_data = {
                     "status": "ERROR",
                     "message": "任务不存在",
-                    "error_code": "TASK_NOT_FOUND"
+                    "error_code": "TASK_NOT_FOUND",
+                    "task_id": task_id
                 }
+                logger.warning(f"⚠️ SSE任务不存在: {task_id}")
                 yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                yield f"event: close\ndata: {json.dumps({'message': '任务不存在，连接关闭'}, ensure_ascii=False)}\n\n"
                 return
 
             # 检查任务所有权（游客可访问）
