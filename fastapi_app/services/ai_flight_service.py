@@ -979,62 +979,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
             logger.error(f"❌ 标准化航班字段失败: {e}")
             # 不抛出异常，继续处理
 
-    def _generate_flight_summary(self, google_data: list, kiwi_data: list, ai_data: list) -> str:
-        """
-        生成航班数据的统计摘要，而不是完整的航班详情
-        """
-        try:
-            # 合并所有航班数据
-            all_flights = []
-            if google_data:
-                all_flights.extend(google_data)
-            if kiwi_data:
-                all_flights.extend(kiwi_data)
-            if ai_data:
-                all_flights.extend(ai_data)
 
-            if not all_flights:
-                return "未找到航班数据"
-
-            # 提取价格信息
-            prices = []
-            for flight in all_flights:
-                try:
-                    if isinstance(flight, dict):
-                        price = flight.get('price_numeric') or flight.get('price', {}).get('amount', 0)
-                    else:
-                        price = getattr(flight, 'price_numeric', 0) or getattr(flight, 'price', 0)
-
-                    if price and isinstance(price, (int, float)) and price > 0:
-                        prices.append(price)
-                except:
-                    continue
-
-            # 生成统计摘要
-            total_flights = len(all_flights)
-            if prices:
-                min_price = min(prices)
-                max_price = max(prices)
-                avg_price = sum(prices) / len(prices)
-
-                summary = f"""
-- **总航班数**: {total_flights} 个选择
-- **价格区间**: ${min_price:.0f} - ${max_price:.0f}
-- **平均价格**: ${avg_price:.0f}
-- **数据来源**: 多个航班搜索平台
-"""
-            else:
-                summary = f"""
-- **总航班数**: {total_flights} 个选择
-- **价格信息**: 暂无可用价格数据
-- **数据来源**: 多个航班搜索平台
-"""
-
-            return summary.strip()
-
-        except Exception as e:
-            logger.error(f"生成航班统计摘要失败: {e}")
-            return "航班数据统计生成失败"
 
     def _clean_data_for_ai(self, data: list, data_type: str) -> list:
         """
@@ -1433,58 +1378,10 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                         }
                     }
             else:
-                # AI处理失败或返回空内容时的降级处理
-                logger.warning("⚠️ AI分析报告为空，启用降级处理机制")
+                # AI处理失败或返回空内容时，抛出异常触发重试
+                logger.warning("⚠️ AI分析报告为空，将触发重试机制")
+                raise Exception("AI返回空内容，需要重试")
 
-                # 统计可用的航班数据
-                total_flights = len(google_flights) + len(kiwi_flights) + len(ai_flights)
-                logger.info(f"📊 降级处理：使用 {total_flights} 个原始航班数据")
-
-                if total_flights > 0:
-                    # 合并所有航班数据
-                    all_flights = []
-
-                    # 添加Google航班
-                    if google_flights:
-                        all_flights.extend(google_flights)
-                        logger.info(f"📊 降级处理：添加 {len(google_flights)} 个Google航班")
-
-                    # 添加Kiwi航班
-                    if kiwi_flights:
-                        all_flights.extend(kiwi_flights)
-                        logger.info(f"📊 降级处理：添加 {len(kiwi_flights)} 个Kiwi航班")
-
-                    # 添加AI推荐航班
-                    if ai_flights:
-                        all_flights.extend(ai_flights)
-                        logger.info(f"📊 降级处理：添加 {len(ai_flights)} 个AI推荐航班")
-
-                    # 生成基本的分析报告
-                    search_params = {
-                        'departure_code': departure_code,
-                        'destination_code': destination_code,
-                        'language': language
-                    }
-                    fallback_report = self._generate_fallback_analysis_report(
-                        all_flights, search_params, user_preferences
-                    )
-
-                    logger.info(f"✅ 降级处理完成：生成基本分析报告，包含 {len(all_flights)} 个航班")
-
-                    return {
-                        'success': True,
-                        'flights': all_flights,
-                        'ai_analysis_report': fallback_report,
-                        'total_count': len(all_flights),
-                        'fallback_mode': True  # 标记为降级模式
-                    }
-                else:
-                    logger.error("❌ 降级处理失败：没有可用的航班数据")
-                    return {
-                        'success': False,
-                        'flights': [],
-                        'error': '未找到航班数据'
-                    }
 
         except Exception as e:
             logger.error(f"AI航班数据处理异常: {e}")
@@ -1494,79 +1391,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 'error': str(e)
             }
 
-    def _generate_fallback_analysis_report(self, flights: List[dict], search_params: dict, user_preferences: str) -> str:
-        """生成降级模式的基本分析报告"""
-        try:
-            if not flights:
-                return "抱歉，未找到符合条件的航班。"
 
-            # 基本统计
-            total_count = len(flights)
-            departure = search_params.get('departure_code', '')
-            destination = search_params.get('destination_code', '')
-            depart_date = search_params.get('depart_date', '')
-
-            # 价格统计
-            prices = []
-            for flight in flights:
-                try:
-                    price_str = flight.get('price', '0')
-                    if isinstance(price_str, str):
-                        price_str = price_str.replace('$', '').replace(',', '').replace('¥', '').replace('￥', '')
-                    price = float(price_str)
-                    if price > 0:
-                        prices.append(price)
-                except:
-                    continue
-
-            if prices:
-                min_price = min(prices)
-                max_price = max(prices)
-                avg_price = sum(prices) / len(prices)
-            else:
-                min_price = max_price = avg_price = 0
-
-            # 生成基本报告
-            report = f"""# 🛫 航班搜索结果分析
-
-## 📊 搜索概况
-- **航线**: {departure} → {destination}
-- **出发日期**: {depart_date}
-- **找到航班**: {total_count} 个选择
-- **用户偏好**: {user_preferences or '无特殊要求'}
-
-## 💰 价格分析
-"""
-
-            if prices:
-                report += f"""- **最低价格**: ${min_price:.0f}
-- **最高价格**: ${max_price:.0f}
-- **平均价格**: ${avg_price:.0f}
-
-## 🎯 推荐建议
-"""
-                if user_preferences and '便宜' in user_preferences:
-                    report += f"- 根据您的偏好，推荐选择最低价格 ${min_price:.0f} 的航班\n"
-
-                report += f"- 价格区间较大，建议比较不同时间段的航班\n"
-                report += f"- 共找到 {total_count} 个航班选择，请根据时间和价格综合考虑\n"
-            else:
-                report += "- 价格信息暂时无法获取\n"
-
-            report += f"""
-## 📝 说明
-- 数据来源：多个航班搜索平台
-- 价格可能实时变动，请以实际预订为准
-- 建议提前预订以获得更好的价格
-
-*注：由于AI分析服务暂时不可用，以上为基础分析报告*
-"""
-
-            return report
-
-        except Exception as e:
-            logger.error(f"生成降级分析报告失败: {e}")
-            return f"找到 {len(flights)} 个航班选择，请查看具体航班信息。"
 
     def _convert_flight_to_dict(self, flight) -> dict:
         """将FlightResult对象转换为字典格式 - 优化版本"""
@@ -1731,71 +1556,20 @@ You must strictly follow this key principle: The most successful Skiplagging opp
         # Kiwi: 字典格式
         # AI推荐: FlightResult对象
 
-        # 使用简化的提示词，只包含统计信息而不是完整航班数据
-        return self._create_simplified_prompt(
-            google_data=google_data,
+        # 使用优化版V3提示词系统，分离静态指令和动态数据
+        from ..prompts.flight_processor_prompts_v2 import create_final_analysis_prompt
+
+        return create_final_analysis_prompt(
+            google_flights_data=google_data,
             kiwi_data=kiwi_data,
             ai_data=ai_data,
+            language=language,
             departure_code=departure_code,
             destination_code=destination_code,
-            user_preferences=user_preferences,
-            language=language
+            user_preferences=user_preferences
         )
 
-    def _create_simplified_prompt(self, google_data: list, kiwi_data: list, ai_data: list,
-                                 departure_code: str, destination_code: str,
-                                 user_preferences: str, language: str) -> str:
-        """
-        创建简化的AI提示词，只包含统计信息而不是完整航班数据
-        """
-        # 生成航班统计摘要而不是完整数据
-        flight_summary = self._generate_flight_summary(google_data, kiwi_data, ai_data)
 
-        # 创建简化的提示词
-        if language == "zh":
-            prompt = f"""
-# 🎯 航班分析任务
-
-## 📊 搜索概况
-- **航线**: {departure_code} → {destination_code}
-- **用户偏好**: {user_preferences or "无特殊要求"}
-
-## 📈 航班数据统计
-{flight_summary}
-
-## 🎯 任务要求
-请基于以上统计信息，生成一份简洁的航班分析报告，包括：
-
-1. **搜索结果概览** - 总航班数、价格区间等
-2. **价格分析** - 最低价、最高价、平均价格
-3. **推荐建议** - 基于用户偏好的个性化建议
-4. **注意事项** - 预订建议和注意事项
-
-请用Markdown格式输出，保持简洁专业。
-"""
-        else:
-            prompt = f"""
-# 🎯 Flight Analysis Task
-
-## 📊 Search Overview
-- **Route**: {departure_code} → {destination_code}
-- **User Preferences**: {user_preferences or "No specific requirements"}
-
-## 📈 Flight Data Statistics
-{flight_summary}
-
-## 🎯 Task Requirements
-Based on the above statistics, generate a concise flight analysis report including:
-
-1. **Search Results Overview** - Total flights, price range, etc.
-2. **Price Analysis** - Lowest, highest, average prices
-3. **Recommendations** - Personalized suggestions based on user preferences
-4. **Important Notes** - Booking tips and considerations
-
-Please output in Markdown format, keep it concise and professional.
-"""
-
-        return prompt
 
     # 移除多轮对话方法，统一使用单轮对话处理
 
