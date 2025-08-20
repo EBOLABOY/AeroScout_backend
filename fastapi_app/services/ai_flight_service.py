@@ -438,7 +438,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
 - Note: Use city codes like NYC (New York), LAX (Los Angeles), CHI (Chicago), not airport codes like JFK, LGA, EWR
             """
 
-            # AI推荐隐藏目的地使用gemini-2.5-flash（速度快）
+            # AI推荐隐藏目的地使用快速模型（小数据量）
             ai_response = await self._call_ai_api(ai_prompt, "gemini-2.5-flash")
             hidden_destinations = []
 
@@ -1221,130 +1221,133 @@ You must strictly follow this key principle: The most successful Skiplagging opp
         user_preferences: str = ""
     ) -> Dict[str, Any]:
         """
-        使用AI处理航班数据
+        使用AI处理航班数据，支持重试机制
         """
-        try:
-            logger.info(f"🤖 [AI处理] 开始处理航班数据: {departure_code} → {destination_code}")
+        max_retries = 3
 
-            # 【增强日志】详细记录输入数据的结构和内容
-            logger.info(f"🔍 [AI处理] 输入数据统计:")
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"🤖 [AI处理] 开始处理航班数据: {departure_code} → {destination_code}")
 
-            # Google Flights数据分析
-            google_count = len(google_flights) if isinstance(google_flights, list) else 0
-            logger.info(f"  - Google Flights: {google_count} 条 (类型: {type(google_flights)})")
-            if google_flights and google_count > 0:
-                logger.info(f"  - Google样本: {str(google_flights[0])[:200]}...")
+                # 【增强日志】详细记录输入数据的结构和内容
+                logger.info(f"🔍 [AI处理] 输入数据统计:")
 
-            # Kiwi数据详细分析
-            kiwi_count = 0
-            logger.info(f"  - Kiwi原始数据类型: {type(kiwi_flights)}")
-            if isinstance(kiwi_flights, dict) and 'results' in kiwi_flights:
-                kiwi_count = len(kiwi_flights['results'].get('flights', []))
-                logger.info(f"  - Kiwi (嵌套格式): {kiwi_count} 条")
-                if kiwi_count > 0:
-                    sample_flight = kiwi_flights['results']['flights'][0]
-                    logger.info(f"  - Kiwi样本: {str(sample_flight)[:200]}...")
-            elif isinstance(kiwi_flights, list):
-                kiwi_count = len(kiwi_flights)
-                logger.info(f"  - Kiwi (列表格式): {kiwi_count} 条")
-                if kiwi_count > 0:
-                    logger.info(f"  - Kiwi样本: {str(kiwi_flights[0])[:200]}...")
-            else:
-                logger.warning(f"  - Kiwi数据格式异常: {type(kiwi_flights)}, 内容: {str(kiwi_flights)[:100]}...")
+                # Google Flights数据分析
+                google_count = len(google_flights) if isinstance(google_flights, list) else 0
+                logger.info(f"  - Google Flights: {google_count} 条 (类型: {type(google_flights)})")
+                if google_flights and google_count > 0:
+                    logger.info(f"  - Google样本: {str(google_flights[0])[:200]}...")
 
-            # AI数据分析
-            ai_count = len(ai_flights) if isinstance(ai_flights, list) else 0
-            logger.info(f"  - AI推荐: {ai_count} 条 (类型: {type(ai_flights)})")
-            if ai_flights and ai_count > 0:
-                logger.info(f"  - AI样本: {str(ai_flights[0])[:200]}...")
-
-            logger.info(f"📊 [AI处理] 数据源统计: Google({google_count}), Kiwi({kiwi_count}), AI({ai_count})")
-
-            # 【增强日志】检查Kiwi数据的JSON序列化能力
-            if kiwi_flights:
-                try:
-                    import json
-                    # 测试Kiwi数据的序列化
-                    if isinstance(kiwi_flights, list) and kiwi_flights:
-                        test_kiwi = json.dumps(kiwi_flights[0], default=str, ensure_ascii=False)
-                        logger.info(f"✅ [AI处理] Kiwi数据JSON序列化测试成功")
-                        logger.info(f"🔍 [AI处理] Kiwi序列化样本: {test_kiwi[:200]}...")
-                    elif isinstance(kiwi_flights, dict):
-                        test_kiwi = json.dumps(kiwi_flights, default=str, ensure_ascii=False)
-                        logger.info(f"✅ [AI处理] Kiwi字典数据JSON序列化测试成功")
-                        logger.info(f"🔍 [AI处理] Kiwi序列化长度: {len(test_kiwi)}")
-                except Exception as kiwi_json_error:
-                    logger.error(f"❌ [AI处理] Kiwi数据JSON序列化失败: {kiwi_json_error}")
-                    logger.error(f"❌ [AI处理] 问题数据: {str(kiwi_flights)[:300]}...")
-
-            # 如果所有数据源都为空，返回错误
-            total_flights = google_count + kiwi_count + ai_count
-            if total_flights == 0:
-                logger.warning("⚠️ [AI处理] 所有数据源都为空，无法进行AI分析")
-                return {
-                    'ai_analysis_report': '## 搜索结果\n\n抱歉，未找到符合条件的航班。请尝试调整搜索条件。',
-                    'summary': {
-                        'total_flights': 0,
-                        'google_flights': 0,
-                        'kiwi_flights': 0,
-                        'ai_flights': 0,
-                        'processing_method': 'empty_data'
-                    }
-                }
-
-            # 对AI推荐数据进行最终的排序和数量限制
-            if ai_flights and len(ai_flights) > 100:
-                # 按价格排序（升序）
-                try:
-                    ai_flights_sorted = sorted(ai_flights, key=lambda x: getattr(x, 'price', float('inf')))
-                    ai_flights = ai_flights_sorted[:100]  # 取前100个最便宜的
-                    logger.info(f"🔧 [AI处理] AI推荐数据最终排序和限制: 从 {ai_count} 条减少到 {len(ai_flights)} 条（前100最便宜）")
-                except Exception as e:
-                    logger.warning(f"⚠️ [AI处理] AI推荐数据排序失败: {e}")
-                    ai_flights = ai_flights[:100]  # 如果排序失败，至少限制数量
-                    logger.info(f"🔧 [AI处理] AI推荐数据数量限制: 从 {ai_count} 条减少到 {len(ai_flights)} 条")
-
-            # 统一使用单轮对话处理所有数据（已优化数据清理，可以处理大量数据）
-            final_total = len(google_flights) + len(kiwi_flights) + len(ai_flights)
-            logger.info(f"📊 [AI处理] 最终处理{final_total}条航班数据，使用单轮对话 + 降级机制")
-            processed_data = await self._process_with_fallback_ai(
-                google_flights, kiwi_flights, ai_flights,
-                language, departure_code, destination_code, user_preferences
-            )
-
-            # 详细记录processed_data的内容
-            logger.info(f"🔍 [AI处理结果] processed_data类型: {type(processed_data)}")
-            if processed_data:
-                logger.info(f"🔍 [AI处理结果] processed_data键: {list(processed_data.keys()) if isinstance(processed_data, dict) else 'Not a dict'}")
-                ai_report = processed_data.get('ai_analysis_report', '')
-                logger.info(f"🔍 [AI处理结果] ai_analysis_report长度: {len(ai_report)}")
-                if ai_report:
-                    preview = ai_report[:200].replace('\n', '\\n')
-                    logger.info(f"🔍 [AI处理结果] ai_analysis_report预览: {preview}")
+                # Kiwi数据详细分析
+                kiwi_count = 0
+                logger.info(f"  - Kiwi原始数据类型: {type(kiwi_flights)}")
+                if isinstance(kiwi_flights, dict) and 'results' in kiwi_flights:
+                    kiwi_count = len(kiwi_flights['results'].get('flights', []))
+                    logger.info(f"  - Kiwi (嵌套格式): {kiwi_count} 条")
+                    if kiwi_count > 0:
+                        sample_flight = kiwi_flights['results']['flights'][0]
+                        logger.info(f"  - Kiwi样本: {str(sample_flight)[:200]}...")
+                elif isinstance(kiwi_flights, list):
+                    kiwi_count = len(kiwi_flights)
+                    logger.info(f"  - Kiwi (列表格式): {kiwi_count} 条")
+                    if kiwi_count > 0:
+                        logger.info(f"  - Kiwi样本: {str(kiwi_flights[0])[:200]}...")
                 else:
-                    logger.warning("⚠️ [AI处理结果] ai_analysis_report为空！")
-            else:
-                logger.error("❌ [AI处理结果] processed_data为None或False！")
+                    logger.warning(f"  - Kiwi数据格式异常: {type(kiwi_flights)}, 内容: {str(kiwi_flights)[:100]}...")
 
-            if processed_data and processed_data.get('ai_analysis_report'):
-                # 检查是否是新的Markdown格式
-                if processed_data.get('summary', {}).get('markdown_format'):
-                    logger.info(f"✅ AI Markdown分析报告生成成功")
-                    logger.info(f"📊 处理了 {len(google_flights) + len(kiwi_flights) + len(ai_flights)} 个原始航班，生成智能分析报告")
+                # AI数据分析
+                ai_count = len(ai_flights) if isinstance(ai_flights, list) else 0
+                logger.info(f"  - AI推荐: {ai_count} 条 (类型: {type(ai_flights)})")
+                if ai_flights and ai_count > 0:
+                    logger.info(f"  - AI样本: {str(ai_flights[0])[:200]}...")
 
-                    # 只返回AI分析报告，不返回航班数据
-                    ai_report = processed_data.get('ai_analysis_report', '')
-                    logger.info(f"📊 返回AI分析报告，长度: {len(ai_report)} 字符")
+                logger.info(f"📊 [AI处理] 数据源统计: Google({google_count}), Kiwi({kiwi_count}), AI({ai_count})")
 
+                # 【增强日志】检查Kiwi数据的JSON序列化能力
+                if kiwi_flights:
+                    try:
+                        import json
+                        # 测试Kiwi数据的序列化
+                        if isinstance(kiwi_flights, list) and kiwi_flights:
+                            test_kiwi = json.dumps(kiwi_flights[0], default=str, ensure_ascii=False)
+                            logger.info(f"✅ [AI处理] Kiwi数据JSON序列化测试成功")
+                            logger.info(f"🔍 [AI处理] Kiwi序列化样本: {test_kiwi[:200]}...")
+                        elif isinstance(kiwi_flights, dict):
+                            test_kiwi = json.dumps(kiwi_flights, default=str, ensure_ascii=False)
+                            logger.info(f"✅ [AI处理] Kiwi字典数据JSON序列化测试成功")
+                            logger.info(f"🔍 [AI处理] Kiwi序列化长度: {len(test_kiwi)}")
+                    except Exception as kiwi_json_error:
+                        logger.error(f"❌ [AI处理] Kiwi数据JSON序列化失败: {kiwi_json_error}")
+                        logger.error(f"❌ [AI处理] 问题数据: {str(kiwi_flights)[:300]}...")
+
+                # 如果所有数据源都为空，返回错误
+                total_flights = google_count + kiwi_count + ai_count
+                if total_flights == 0:
+                    logger.warning("⚠️ [AI处理] 所有数据源都为空，无法进行AI分析")
                     return {
-                        'success': True,
-                        'flights': [],  # 不返回航班数据，只返回AI报告
-                        'summary': processed_data.get('summary', {}),
-                        'ai_analysis_report': ai_report,
-                        'total_count': 0,  # 不返回航班数据
-                        'processing_info': {
-                            'source_counts': {
-                                'regular_search': len(google_flights),
+                        'ai_analysis_report': '## 搜索结果\n\n抱歉，未找到符合条件的航班。请尝试调整搜索条件。',
+                        'summary': {
+                            'total_flights': 0,
+                            'google_flights': 0,
+                            'kiwi_flights': 0,
+                            'ai_flights': 0,
+                            'processing_method': 'empty_data'
+                        }
+                    }
+
+                # 对AI推荐数据进行最终的排序和数量限制
+                if ai_flights and len(ai_flights) > 100:
+                    # 按价格排序（升序）
+                    try:
+                        ai_flights_sorted = sorted(ai_flights, key=lambda x: getattr(x, 'price', float('inf')))
+                        ai_flights = ai_flights_sorted[:100]  # 取前100个最便宜的
+                        logger.info(f"🔧 [AI处理] AI推荐数据最终排序和限制: 从 {ai_count} 条减少到 {len(ai_flights)} 条（前100最便宜）")
+                    except Exception as e:
+                        logger.warning(f"⚠️ [AI处理] AI推荐数据排序失败: {e}")
+                        ai_flights = ai_flights[:100]  # 如果排序失败，至少限制数量
+                        logger.info(f"🔧 [AI处理] AI推荐数据数量限制: 从 {ai_count} 条减少到 {len(ai_flights)} 条")
+
+                # 统一使用单轮对话处理所有数据（已优化数据清理，可以处理大量数据）
+                final_total = len(google_flights) + len(kiwi_flights) + len(ai_flights)
+                logger.info(f"📊 [AI处理] 最终处理{final_total}条航班数据，使用重试机制")
+                processed_data = await self._process_with_fallback_ai(
+                    google_flights, kiwi_flights, ai_flights,
+                    language, departure_code, destination_code, user_preferences
+                )
+
+                # 详细记录processed_data的内容
+                logger.info(f"🔍 [AI处理结果] processed_data类型: {type(processed_data)}")
+                if processed_data:
+                    logger.info(f"🔍 [AI处理结果] processed_data键: {list(processed_data.keys()) if isinstance(processed_data, dict) else 'Not a dict'}")
+                    ai_report = processed_data.get('ai_analysis_report', '')
+                    logger.info(f"🔍 [AI处理结果] ai_analysis_report长度: {len(ai_report)}")
+                    if ai_report:
+                        preview = ai_report[:200].replace('\n', '\\n')
+                        logger.info(f"🔍 [AI处理结果] ai_analysis_report预览: {preview}")
+                    else:
+                        logger.warning("⚠️ [AI处理结果] ai_analysis_report为空！")
+                else:
+                    logger.error("❌ [AI处理结果] processed_data为None或False！")
+
+                if processed_data and processed_data.get('ai_analysis_report'):
+                    # 检查是否是新的Markdown格式
+                    if processed_data.get('summary', {}).get('markdown_format'):
+                        logger.info(f"✅ AI Markdown分析报告生成成功")
+                        logger.info(f"📊 处理了 {len(google_flights) + len(kiwi_flights) + len(ai_flights)} 个原始航班，生成智能分析报告")
+
+                        # 只返回AI分析报告，不返回航班数据
+                        ai_report = processed_data.get('ai_analysis_report', '')
+                        logger.info(f"📊 返回AI分析报告，长度: {len(ai_report)} 字符")
+
+                        return {
+                            'success': True,
+                            'flights': [],  # 不返回航班数据，只返回AI报告
+                            'summary': processed_data.get('summary', {}),
+                            'ai_analysis_report': ai_report,
+                            'total_count': 0,  # 不返回航班数据
+                            'processing_info': {
+                                'source_counts': {
+                                    'regular_search': len(google_flights),
                                 'hidden_city_search': len(kiwi_flights),
                                 'ai_analysis': len(ai_flights)
                             },
@@ -1356,40 +1359,48 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                             'report_only': True  # 标记只返回报告
                         }
                     }
-                else:
-                    # 兼容旧的JSON格式
-                    logger.info(f"✅ AI数据处理成功，处理了 {len(processed_data.get('flights', []))} 个航班")
-                    return {
-                        'success': True,
-                        'flights': processed_data.get('flights', []),
-                        'summary': processed_data.get('summary', {}),
-                        'ai_analysis_report': processed_data.get('ai_analysis_report', ''),
-                        'processing_info': {
-                            'source_counts': {
-                                'regular_search': len(google_flights),
-                                'hidden_city_search': len(kiwi_flights),
-                                'ai_analysis': len(ai_flights)
-                            },
-                            'processed_at': datetime.now().isoformat(),
-                            'language': language,
-                            'processor': 'ai',
-                            'user_preferences': user_preferences,
-                            'format': 'json'
+                    else:
+                        # 兼容旧的JSON格式
+                        logger.info(f"✅ AI数据处理成功，处理了 {len(processed_data.get('flights', []))} 个航班")
+                        return {
+                            'success': True,
+                            'flights': processed_data.get('flights', []),
+                            'summary': processed_data.get('summary', {}),
+                            'ai_analysis_report': processed_data.get('ai_analysis_report', ''),
+                            'processing_info': {
+                                'source_counts': {
+                                    'regular_search': len(google_flights),
+                                    'hidden_city_search': len(kiwi_flights),
+                                    'ai_analysis': len(ai_flights)
+                                },
+                                'processed_at': datetime.now().isoformat(),
+                                'language': language,
+                                'processor': 'ai',
+                                'user_preferences': user_preferences,
+                                'format': 'json'
+                            }
                         }
+                else:
+                    # AI处理失败或返回空内容时，抛出异常触发重试
+                    logger.warning(f"⚠️ AI分析报告为空，将触发重试 (尝试 {attempt + 1}/{max_retries})")
+                    raise Exception("AI返回空内容，需要重试")
+
+            except Exception as e:
+                logger.error(f"AI航班数据处理异常 (尝试 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    import asyncio
+                    wait_time = (attempt + 1) * 2  # 递增等待时间：2秒、4秒、6秒
+                    logger.info(f"⏳ {wait_time}秒后重试...")
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    # 所有重试都失败了
+                    logger.error(f"❌ AI航班数据处理失败，已重试 {max_retries} 次")
+                    return {
+                        'success': False,
+                        'flights': [],
+                        'error': f"AI处理失败，已重试 {max_retries} 次: {str(e)}"
                     }
-            else:
-                # AI处理失败或返回空内容时，抛出异常触发重试
-                logger.warning("⚠️ AI分析报告为空，将触发重试机制")
-                raise Exception("AI返回空内容，需要重试")
-
-
-        except Exception as e:
-            logger.error(f"AI航班数据处理异常: {e}")
-            return {
-                'success': False,
-                'flights': [],
-                'error': str(e)
-            }
 
 
 
@@ -1575,72 +1586,97 @@ You must strictly follow this key principle: The most successful Skiplagging opp
 
     async def _process_with_fallback_ai(self, google_flights, kiwi_flights, ai_flights,
                                        language, departure_code, destination_code, user_preferences):
-        """使用降级机制处理航班数据：先尝试pro模型，失败则降级到flash模型"""
-        try:
-            logger.info("🔄 开始降级机制AI处理（单轮对话）")
+        """使用重试机制处理航班数据，使用环境变量配置的模型"""
+        max_retries = 3
 
-            # 构建完整的单轮提示词
-            prompt = self._build_processing_prompt(
-                google_flights, kiwi_flights, ai_flights,
-                language, departure_code, destination_code, user_preferences
-            )
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"🔄 开始AI处理（尝试 {attempt + 1}/{max_retries}）")
 
-            # 使用内置的降级机制调用AI API
-            logger.info("🚀 尝试AI处理（gemini-2.5-pro → gemini-2.5-flash降级）")
+                # 构建完整的单轮提示词
+                prompt = self._build_processing_prompt(
+                    google_flights, kiwi_flights, ai_flights,
+                    language, departure_code, destination_code, user_preferences
+                )
 
-            result = await self._call_ai_api(prompt, "gemini-2.5-pro", language, enable_fallback=True)
+                # 智能选择模型：根据数据量大小选择合适的模型
+                payload_size = len(prompt.encode('utf-8'))
 
-            if result and result.get('success'):
-                model_used = result.get('actual_model', result.get('original_model', 'gemini-2.5-pro'))
-                fallback_used = result.get('fallback_used', False)
-                ai_content = result.get('content', '')
-
-                logger.info(f"✅ AI处理成功，使用模型: {model_used}")
-                if fallback_used:
-                    logger.info("🔄 使用了降级机制")
-
-                # 详细记录AI返回的内容
-                logger.info(f"📝 AI返回内容长度: {len(ai_content)} 字符")
-                if ai_content:
-                    # 记录前500个字符用于调试
-                    preview = ai_content[:500].replace('\n', '\\n')
-                    logger.info(f"📝 AI返回内容预览: {preview}")
-                    if len(ai_content) > 500:
-                        logger.info(f"📝 AI返回内容还有 {len(ai_content) - 500} 个字符...")
+                # 大数据量（>50KB）使用pro模型，小数据量使用flash模型
+                if payload_size > 50000:
+                    model_name = "gemini-2.5-pro"
+                    logger.info(f"🧠 大数据量({payload_size:,}字节)，使用强力模型: {model_name}")
                 else:
-                    logger.warning("⚠️ AI返回内容为空！")
+                    model_name = "gemini-2.5-flash"
+                    logger.info(f"⚡ 小数据量({payload_size:,}字节)，使用快速模型: {model_name}")
 
-                return {
-                    'ai_analysis_report': ai_content,
-                    'summary': {
-                        'markdown_format': True,
-                        'model_used': model_used,
-                        'fallback_used': fallback_used,
-                        'processing_method': 'single_turn_with_fallback'
-                    }
-                }
-            else:
-                logger.error("❌ 所有模型都处理失败")
-                # 返回一个包含错误信息的基本报告
-                return {
-                    'ai_analysis_report': self._generate_fallback_report(
-                        google_flights, kiwi_flights, ai_flights,
-                        departure_code, destination_code, user_preferences
-                    ),
-                    'summary': {
-                        'markdown_format': True,
-                        'model_used': 'fallback',
-                        'fallback_used': True,
-                        'processing_method': 'fallback_report',
-                        'error': 'AI模型暂时不可用，已生成基础分析报告'
-                    }
-                }
+                result = await self._call_ai_api(prompt, model_name, language, enable_fallback=False)
 
-        except Exception as e:
-            logger.error(f"❌ 降级机制处理失败: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
+                if result and result.get('success'):
+                    ai_content = result.get('content', '')
+
+                    logger.info(f"✅ AI处理成功，使用模型: {model_name}")
+
+                    # 详细记录AI返回的内容
+                    logger.info(f"📝 AI返回内容长度: {len(ai_content)} 字符")
+                    if ai_content:
+                        # 记录前500个字符用于调试
+                        preview = ai_content[:500].replace('\n', '\\n')
+                        logger.info(f"📝 AI返回内容预览: {preview}")
+                        if len(ai_content) > 500:
+                            logger.info(f"📝 AI返回内容还有 {len(ai_content) - 500} 个字符...")
+
+                        # 检查内容是否为空，如果为空则抛出异常触发重试
+                        if not ai_content.strip():
+                            logger.warning("⚠️ AI返回内容为空，触发重试")
+                            raise Exception("AI返回空内容")
+
+                        return {
+                            'ai_analysis_report': ai_content,
+                            'summary': {
+                                'markdown_format': True,
+                                'model_used': model_name,
+                                'processing_method': 'single_turn_with_retry',
+                                'attempt': attempt + 1
+                            }
+                        }
+                    else:
+                        logger.warning("⚠️ AI返回内容为空，触发重试")
+                        raise Exception("AI返回空内容")
+                else:
+                    logger.warning(f"❌ AI处理失败 (尝试 {attempt + 1}/{max_retries})")
+                    if attempt < max_retries - 1:
+                        import asyncio
+                        wait_time = (attempt + 1) * 2  # 递增等待时间：2秒、4秒、6秒
+                        logger.info(f"⏳ {wait_time}秒后重试...")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    else:
+                        raise Exception("AI处理失败，已达到最大重试次数")
+
+            except Exception as e:
+                logger.error(f"❌ AI处理异常 (尝试 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    import asyncio
+                    wait_time = (attempt + 1) * 2
+                    logger.info(f"⏳ {wait_time}秒后重试...")
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    # 所有重试都失败了，返回错误报告
+                    logger.error(f"❌ AI处理失败，已重试 {max_retries} 次")
+                    return {
+                        'ai_analysis_report': self._generate_fallback_report(
+                            google_flights, kiwi_flights, ai_flights,
+                            departure_code, destination_code, user_preferences
+                        ),
+                        'summary': {
+                            'markdown_format': True,
+                            'model_used': 'fallback',
+                            'processing_method': 'fallback_report',
+                            'error': 'AI模型暂时不可用，已生成基础分析报告'
+                        }
+                    }
 
     def _generate_fallback_report(self, google_flights, kiwi_flights, ai_flights, departure_code, destination_code, user_preferences):
         """生成降级报告，当AI处理失败时使用"""
@@ -1696,30 +1732,24 @@ You must strictly follow this key principle: The most successful Skiplagging opp
 请稍后重试以获得详细的AI分析和推荐。
 """
 
-    async def _call_ai_api(self, prompt: str, model_name: str = None, language: str = "zh", enable_fallback: bool = True) -> Dict:
-        """调用AI API进行数据处理，支持模型降级和重试机制"""
+    async def _call_ai_api(self, prompt: str, model_name: str = None, language: str = "zh", enable_fallback: bool = False) -> Dict:
+        """调用AI API进行数据处理，使用环境变量配置的模型"""
 
-        # 定义模型降级链
+        # 智能选择模型配置
         if model_name is None:
-            model_name = "gemini-2.5-pro"
+            # 根据prompt大小智能选择模型
+            payload_size = len(prompt.encode('utf-8'))
 
-        # 设置降级模型
-        fallback_model = "gemini-2.5-flash" if model_name == "gemini-2.5-pro" else None
+            # 大数据量（>50KB）使用pro模型，小数据量使用flash模型
+            if payload_size > 50000:
+                model_name = "gemini-2.5-pro"
+                logger.info(f"🧠 智能选择强力模型: {model_name} (数据量: {payload_size:,}字节)")
+            else:
+                model_name = "gemini-2.5-flash"
+                logger.info(f"⚡ 智能选择快速模型: {model_name} (数据量: {payload_size:,}字节)")
 
-        # 首先尝试主模型（带重试）
+        # 直接调用指定模型（不使用降级机制）
         result = await self._try_ai_api_call_with_retry(prompt, model_name, language)
-
-        # 如果主模型失败且启用降级，尝试降级模型
-        if not result.get('success') and enable_fallback and fallback_model:
-            logger.warning(f"⚠️ {model_name} 调用失败，尝试降级到 {fallback_model}")
-            result = await self._try_ai_api_call_with_retry(prompt, fallback_model, language)
-
-            if result.get('success'):
-                logger.info(f"✅ 降级到 {fallback_model} 成功")
-                # 在结果中标记使用了降级模型
-                result['fallback_used'] = True
-                result['original_model'] = model_name
-                result['actual_model'] = fallback_model
 
         # 确保总是返回字典格式
         if not isinstance(result, dict):
@@ -1833,18 +1863,33 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                         result = await response.json()
                         content = result['choices'][0]['message']['content']
 
+                        # 详细记录AI原始响应
+                        logger.info(f"🔍 AI原始响应长度: {len(content)} 字符")
+                        if content:
+                            preview = content[:200].replace('\n', '\\n')
+                            logger.info(f"🔍 AI原始响应预览: {preview}")
+                        else:
+                            logger.warning("⚠️ AI原始响应为空！")
+
+                        # 检查strip后的长度
+                        stripped_content = content.strip()
+                        logger.info(f"🔍 AI响应strip后长度: {len(stripped_content)} 字符")
+                        if len(content) != len(stripped_content):
+                            logger.warning(f"⚠️ strip()删除了 {len(content) - len(stripped_content)} 个字符！")
+                            logger.info(f"🔍 被删除的字符: {repr(content[:50])}")
+
                         # 处理纯Markdown响应
                         try:
                             # 只记录处理成功，不输出任何AI内容
                             logger.info("AI Markdown响应处理完成")
 
                             # 新版本返回纯Markdown格式，不再包含JSON
-                            # 直接返回markdown内容作为分析报告
+                            # 直接返回markdown内容作为分析报告，不使用strip()
                             return {
                                 'success': True,  # 添加成功标记
-                                'content': content.strip(),  # 添加内容字段
+                                'content': content,  # 保留原始内容，不使用strip()
                                 'flights': [],  # 航班数据现在在markdown中
-                                'ai_analysis_report': content.strip(),
+                                'ai_analysis_report': content,  # 保留原始内容，不使用strip()
                                 'summary': {
                                     'total_flights': 0,  # 将从markdown中解析
                                     'markdown_format': True,
