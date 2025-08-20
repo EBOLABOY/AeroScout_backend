@@ -100,6 +100,10 @@ async def optional_auth(credentials: Optional[HTTPAuthorizationCredentials] = De
         return None
 
 
+# 为了保持一致性，创建一个别名
+get_current_user_optional = optional_auth
+
+
 def create_access_token(user_id: int, expires_delta: Optional[timedelta] = None) -> str:
     """创建访问令牌"""
     if expires_delta:

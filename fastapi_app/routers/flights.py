@@ -13,7 +13,7 @@ from fastapi_app.models.flights import (
     FlightSearchRequest, FlightSearchResponse, MonitorDataResponse,
     SeatClass, MaxStops, SortBy
 )
-from fastapi_app.dependencies.auth import get_current_active_user
+from fastapi_app.dependencies.auth import get_current_active_user, get_current_user_optional
 from fastapi_app.services.ai_flight_service import AIFlightService
 from fastapi_app.services.flight_service import get_flight_service
 from fastapi_app.services.async_task_service import async_task_service, TaskStatus
@@ -681,7 +681,7 @@ async def start_ai_enhanced_search_async(
     language: str = Query("zh", description="语言设置 (zh/en)"),
     currency: str = Query("CNY", description="货币设置 (CNY/USD)"),
     user_preferences: str = Query("", description="用户偏好和要求"),
-    current_user: UserInfo = Depends(get_current_active_user)
+    current_user: Optional[UserInfo] = Depends(get_current_user_optional)
 ):
     """
     异步AI增强航班搜索 - 提交任务
@@ -689,7 +689,11 @@ async def start_ai_enhanced_search_async(
     立即返回任务ID，搜索在后台进行
     """
     try:
-        logger.info(f"用户 {current_user.username} 开始异步AI增强搜索: {departure_code} → {destination_code}")
+        # 处理游客和登录用户
+        user_display = current_user.username if current_user else "游客"
+        user_id = current_user.id if current_user else "guest"
+
+        logger.info(f"用户 {user_display} 开始异步AI增强搜索: {departure_code} → {destination_code}")
 
         # 初始化异步任务服务
         await async_task_service.initialize()
@@ -716,7 +720,7 @@ async def start_ai_enhanced_search_async(
         task_id = await async_task_service.create_task(
             task_type="ai_flight_search",
             search_params=search_params,
-            user_id=current_user.id
+            user_id=user_id
         )
 
         # 启动后台任务
@@ -746,7 +750,7 @@ async def start_ai_enhanced_search_async(
 @router.get("/task/{task_id}/status", response_model=APIResponse)
 async def get_task_status(
     task_id: str,
-    current_user: UserInfo = Depends(get_current_active_user)
+    current_user: Optional[UserInfo] = Depends(get_current_user_optional)
 ):
     """
     查询异步任务状态
