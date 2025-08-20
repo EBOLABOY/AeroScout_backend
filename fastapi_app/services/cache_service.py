@@ -20,13 +20,16 @@ from fastapi_app.config import settings
 
 
 class CacheService:
-    """Redis缓存服务"""
-    
+    """Redis缓存服务，支持内存缓存降级"""
+
     def __init__(self):
         """初始化缓存服务"""
         self.redis: Optional[Any] = None
         self.settings = settings
         self._connection_pool = None
+        # 内存缓存降级方案
+        self._memory_cache: Dict[str, Dict] = {}
+        self._memory_cache_lock = asyncio.Lock()
         logger.info("CacheService初始化成功")
     
     async def connect(self):
@@ -69,7 +72,27 @@ class CacheService:
             return value.isoformat()
         else:
             return str(value)
-    
+
+    def _is_memory_cache_expired(self, cache_entry: Dict) -> bool:
+        """检查内存缓存是否过期"""
+        if 'expire_at' not in cache_entry:
+            return False
+        return datetime.now() > datetime.fromisoformat(cache_entry['expire_at'])
+
+    async def _memory_cache_cleanup(self):
+        """清理过期的内存缓存"""
+        async with self._memory_cache_lock:
+            expired_keys = []
+            for key, entry in self._memory_cache.items():
+                if self._is_memory_cache_expired(entry):
+                    expired_keys.append(key)
+
+            for key in expired_keys:
+                del self._memory_cache[key]
+
+            if expired_keys:
+                logger.debug(f"清理了 {len(expired_keys)} 个过期的内存缓存项")
+
     def _deserialize_value(self, value: str, value_type: type = None) -> Any:
         """反序列化值"""
         if not value:
@@ -96,56 +119,99 @@ class CacheService:
     
     async def get(self, key: str, value_type: type = None) -> Any:
         """获取缓存值"""
-        if not self.redis:
-            return None
-            
-        try:
-            value = await self.redis.get(key)
-            if value is None:
-                return None
-            return self._deserialize_value(value, value_type)
-        except Exception as e:
-            logger.error(f"获取缓存失败 {key}: {e}")
+        if self.redis:
+            try:
+                value = await self.redis.get(key)
+                if value is None:
+                    return None
+                return self._deserialize_value(value, value_type)
+            except Exception as e:
+                logger.error(f"Redis获取缓存失败 {key}: {e}")
+                # Redis失败时降级到内存缓存
+
+        # 使用内存缓存（Redis不可用或失败时）
+        async with self._memory_cache_lock:
+            if key in self._memory_cache:
+                entry = self._memory_cache[key]
+                if not self._is_memory_cache_expired(entry):
+                    return self._deserialize_value(entry['value'], value_type)
+                else:
+                    # 删除过期项
+                    del self._memory_cache[key]
             return None
     
     async def set(
-        self, 
-        key: str, 
-        value: Any, 
+        self,
+        key: str,
+        value: Any,
         expire: Optional[int] = None,
         expire_timedelta: Optional[timedelta] = None
     ) -> bool:
         """设置缓存值"""
-        if not self.redis:
-            return False
-            
+        if self.redis:
+            try:
+                serialized_value = self._serialize_value(value)
+
+                if expire_timedelta:
+                    expire = int(expire_timedelta.total_seconds())
+
+                if expire:
+                    await self.redis.setex(key, expire, serialized_value)
+                else:
+                    await self.redis.set(key, serialized_value)
+
+                return True
+            except Exception as e:
+                logger.error(f"Redis设置缓存失败 {key}: {e}")
+                # Redis失败时降级到内存缓存
+
+        # 使用内存缓存（Redis不可用或失败时）
         try:
             serialized_value = self._serialize_value(value)
-            
+
             if expire_timedelta:
                 expire = int(expire_timedelta.total_seconds())
-            
+
+            cache_entry = {
+                'value': serialized_value,
+                'created_at': datetime.now().isoformat()
+            }
+
             if expire:
-                await self.redis.setex(key, expire, serialized_value)
-            else:
-                await self.redis.set(key, serialized_value)
-            
+                expire_at = datetime.now() + timedelta(seconds=expire)
+                cache_entry['expire_at'] = expire_at.isoformat()
+
+            async with self._memory_cache_lock:
+                self._memory_cache[key] = cache_entry
+                # 定期清理过期项（每100次写入清理一次）
+                if len(self._memory_cache) % 100 == 0:
+                    await self._memory_cache_cleanup()
+
+            logger.debug(f"使用内存缓存保存: {key}")
             return True
         except Exception as e:
-            logger.error(f"设置缓存失败 {key}: {e}")
+            logger.error(f"内存缓存设置失败 {key}: {e}")
             return False
     
     async def delete(self, key: str) -> bool:
         """删除缓存"""
-        if not self.redis:
-            return False
-            
-        try:
-            result = await self.redis.delete(key)
-            return result > 0
-        except Exception as e:
-            logger.error(f"删除缓存失败 {key}: {e}")
-            return False
+        redis_success = False
+        memory_success = False
+
+        if self.redis:
+            try:
+                result = await self.redis.delete(key)
+                redis_success = result > 0
+            except Exception as e:
+                logger.error(f"Redis删除缓存失败 {key}: {e}")
+
+        # 同时删除内存缓存
+        async with self._memory_cache_lock:
+            if key in self._memory_cache:
+                del self._memory_cache[key]
+                memory_success = True
+
+        return redis_success or memory_success
     
     async def delete_pattern(self, pattern: str) -> int:
         """删除匹配模式的缓存"""
