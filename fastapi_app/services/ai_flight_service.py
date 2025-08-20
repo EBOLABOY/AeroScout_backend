@@ -979,6 +979,63 @@ You must strictly follow this key principle: The most successful Skiplagging opp
             logger.error(f"❌ 标准化航班字段失败: {e}")
             # 不抛出异常，继续处理
 
+    def _generate_flight_summary(self, google_data: list, kiwi_data: list, ai_data: list) -> str:
+        """
+        生成航班数据的统计摘要，而不是完整的航班详情
+        """
+        try:
+            # 合并所有航班数据
+            all_flights = []
+            if google_data:
+                all_flights.extend(google_data)
+            if kiwi_data:
+                all_flights.extend(kiwi_data)
+            if ai_data:
+                all_flights.extend(ai_data)
+
+            if not all_flights:
+                return "未找到航班数据"
+
+            # 提取价格信息
+            prices = []
+            for flight in all_flights:
+                try:
+                    if isinstance(flight, dict):
+                        price = flight.get('price_numeric') or flight.get('price', {}).get('amount', 0)
+                    else:
+                        price = getattr(flight, 'price_numeric', 0) or getattr(flight, 'price', 0)
+
+                    if price and isinstance(price, (int, float)) and price > 0:
+                        prices.append(price)
+                except:
+                    continue
+
+            # 生成统计摘要
+            total_flights = len(all_flights)
+            if prices:
+                min_price = min(prices)
+                max_price = max(prices)
+                avg_price = sum(prices) / len(prices)
+
+                summary = f"""
+- **总航班数**: {total_flights} 个选择
+- **价格区间**: ${min_price:.0f} - ${max_price:.0f}
+- **平均价格**: ${avg_price:.0f}
+- **数据来源**: 多个航班搜索平台
+"""
+            else:
+                summary = f"""
+- **总航班数**: {total_flights} 个选择
+- **价格信息**: 暂无可用价格数据
+- **数据来源**: 多个航班搜索平台
+"""
+
+            return summary.strip()
+
+        except Exception as e:
+            logger.error(f"生成航班统计摘要失败: {e}")
+            return "航班数据统计生成失败"
+
     def _clean_data_for_ai(self, data: list, data_type: str) -> list:
         """
         清理数据，移除无用字段以节省AI token
@@ -1674,25 +1731,71 @@ You must strictly follow this key principle: The most successful Skiplagging opp
         # Kiwi: 字典格式
         # AI推荐: FlightResult对象
 
-        # 使用优化的提示词系统V3（减少冗余，提高效率）
-        from ..prompts.flight_processor_prompts_v2 import (
-            create_final_analysis_prompt
-        )
-
-        # 清理数据，移除无用字段以节省token
-        cleaned_kiwi_data = self._clean_data_for_ai(kiwi_data, 'kiwi')
-        cleaned_google_data = self._clean_data_for_ai(google_data, 'google')
-        cleaned_ai_data = self._clean_data_for_ai(ai_data, 'ai')
-
-        return create_final_analysis_prompt(
-            google_flights_data=cleaned_google_data,  # 清理后的Google数据
-            kiwi_data=cleaned_kiwi_data,             # 清理后的Kiwi数据
-            ai_data=cleaned_ai_data,                 # 清理后的AI数据
-            language=language,
+        # 使用简化的提示词，只包含统计信息而不是完整航班数据
+        return self._create_simplified_prompt(
+            google_data=google_data,
+            kiwi_data=kiwi_data,
+            ai_data=ai_data,
             departure_code=departure_code,
             destination_code=destination_code,
-            user_preferences=user_preferences
+            user_preferences=user_preferences,
+            language=language
         )
+
+    def _create_simplified_prompt(self, google_data: list, kiwi_data: list, ai_data: list,
+                                 departure_code: str, destination_code: str,
+                                 user_preferences: str, language: str) -> str:
+        """
+        创建简化的AI提示词，只包含统计信息而不是完整航班数据
+        """
+        # 生成航班统计摘要而不是完整数据
+        flight_summary = self._generate_flight_summary(google_data, kiwi_data, ai_data)
+
+        # 创建简化的提示词
+        if language == "zh":
+            prompt = f"""
+# 🎯 航班分析任务
+
+## 📊 搜索概况
+- **航线**: {departure_code} → {destination_code}
+- **用户偏好**: {user_preferences or "无特殊要求"}
+
+## 📈 航班数据统计
+{flight_summary}
+
+## 🎯 任务要求
+请基于以上统计信息，生成一份简洁的航班分析报告，包括：
+
+1. **搜索结果概览** - 总航班数、价格区间等
+2. **价格分析** - 最低价、最高价、平均价格
+3. **推荐建议** - 基于用户偏好的个性化建议
+4. **注意事项** - 预订建议和注意事项
+
+请用Markdown格式输出，保持简洁专业。
+"""
+        else:
+            prompt = f"""
+# 🎯 Flight Analysis Task
+
+## 📊 Search Overview
+- **Route**: {departure_code} → {destination_code}
+- **User Preferences**: {user_preferences or "No specific requirements"}
+
+## 📈 Flight Data Statistics
+{flight_summary}
+
+## 🎯 Task Requirements
+Based on the above statistics, generate a concise flight analysis report including:
+
+1. **Search Results Overview** - Total flights, price range, etc.
+2. **Price Analysis** - Lowest, highest, average prices
+3. **Recommendations** - Personalized suggestions based on user preferences
+4. **Important Notes** - Booking tips and considerations
+
+Please output in Markdown format, keep it concise and professional.
+"""
+
+        return prompt
 
     # 移除多轮对话方法，统一使用单轮对话处理
 
