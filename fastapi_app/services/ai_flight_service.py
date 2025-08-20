@@ -1666,8 +1666,8 @@ You must strictly follow this key principle: The most successful Skiplagging opp
 请稍后重试以获得详细的AI分析和推荐。
 """
 
-    async def _call_ai_api(self, prompt: str, model_name: str = None, language: str = "zh", enable_fallback: bool = True) -> Optional[Dict]:
-        """调用AI API进行数据处理，支持模型降级"""
+    async def _call_ai_api(self, prompt: str, model_name: str = None, language: str = "zh", enable_fallback: bool = True) -> Dict:
+        """调用AI API进行数据处理，支持模型降级和重试机制"""
 
         # 定义模型降级链
         if model_name is None:
@@ -1676,22 +1676,63 @@ You must strictly follow this key principle: The most successful Skiplagging opp
         # 设置降级模型
         fallback_model = "gemini-2.5-flash" if model_name == "gemini-2.5-pro" else None
 
-        # 首先尝试主模型
-        result = await self._try_ai_api_call(prompt, model_name, language)
+        # 首先尝试主模型（带重试）
+        result = await self._try_ai_api_call_with_retry(prompt, model_name, language)
 
         # 如果主模型失败且启用降级，尝试降级模型
-        if not result and enable_fallback and fallback_model:
+        if not result.get('success') and enable_fallback and fallback_model:
             logger.warning(f"⚠️ {model_name} 调用失败，尝试降级到 {fallback_model}")
-            result = await self._try_ai_api_call(prompt, fallback_model, language)
+            result = await self._try_ai_api_call_with_retry(prompt, fallback_model, language)
 
-            if result:
+            if result.get('success'):
                 logger.info(f"✅ 降级到 {fallback_model} 成功")
                 # 在结果中标记使用了降级模型
                 result['fallback_used'] = True
                 result['original_model'] = model_name
                 result['actual_model'] = fallback_model
 
+        # 确保总是返回字典格式
+        if not isinstance(result, dict):
+            return {
+                'success': False,
+                'error': 'AI API调用失败',
+                'content': None
+            }
+
         return result
+
+    async def _try_ai_api_call_with_retry(self, prompt: str, model_name: str, language: str = "zh", max_retries: int = 3) -> Dict:
+        """带重试机制的AI API调用"""
+        import asyncio
+
+        for attempt in range(max_retries):
+            try:
+                result = await self._try_ai_api_call(prompt, model_name, language)
+
+                if result and result.get('success'):
+                    return result
+
+                # 如果是429错误，等待后重试
+                if attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 2  # 递增等待时间：2秒、4秒、6秒
+                    logger.warning(f"⏳ AI API调用失败，{wait_time}秒后重试 (尝试 {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(wait_time)
+                    continue
+
+            except Exception as e:
+                logger.error(f"❌ AI API调用异常 (尝试 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 2
+                    await asyncio.sleep(wait_time)
+                    continue
+
+        # 所有重试都失败了
+        logger.error(f"❌ AI API调用失败，已重试 {max_retries} 次")
+        return {
+            'success': False,
+            'error': f'AI API调用失败，已重试 {max_retries} 次',
+            'content': None
+        }
 
     async def _try_ai_api_call(self, prompt: str, model_name: str, language: str = "zh") -> Optional[Dict]:
         """尝试调用AI API"""
@@ -1706,8 +1747,13 @@ You must strictly follow this key principle: The most successful Skiplagging opp
             ai_api_url = AI_API_URL
 
             if not api_key:
-                logger.error("AI API密钥未配置")
-                return None
+                error_msg = "AI API密钥未配置"
+                logger.error(error_msg)
+                return {
+                    'success': False,
+                    'error': error_msg,
+                    'content': None
+                }
 
             headers = {
                 "Authorization": f"Bearer {api_key}",
@@ -1777,24 +1823,59 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                             }
 
                         except Exception as e:
-                            logger.error(f"AI响应处理失败: {e}")
+                            error_msg = f"AI响应处理失败: {e}"
+                            logger.error(error_msg)
                             logger.debug(f"AI原始响应长度: {len(content)} 字符")
-                            return None
+                            return {
+                                'success': False,
+                                'error': error_msg,
+                                'content': None
+                            }
                     else:
-                        logger.error(f"AI API调用失败: {response.status}")
-                        return None
+                        error_msg = f"AI API调用失败: {response.status}"
+                        logger.error(error_msg)
+
+                        # 读取错误响应内容
+                        try:
+                            error_content = await response.text()
+                            logger.debug(f"错误响应内容: {error_content}")
+                        except:
+                            error_content = "无法读取错误内容"
+
+                        return {
+                            'success': False,
+                            'error': error_msg,
+                            'status_code': response.status,
+                            'error_content': error_content,
+                            'content': None
+                        }
 
         except asyncio.TimeoutError:
-            logger.error("AI API调用超时 (5分钟)")
-            return None
+            error_msg = "AI API调用超时 (5分钟)"
+            logger.error(error_msg)
+            return {
+                'success': False,
+                'error': error_msg,
+                'content': None
+            }
         except aiohttp.ClientError as e:
-            logger.error(f"AI API网络连接错误: {e}")
-            return None
+            error_msg = f"AI API网络连接错误: {e}"
+            logger.error(error_msg)
+            return {
+                'success': False,
+                'error': error_msg,
+                'content': None
+            }
         except Exception as e:
-            logger.error(f"调用AI API异常: {type(e).__name__}: {e}")
+            error_msg = f"调用AI API异常: {type(e).__name__}: {e}"
+            logger.error(error_msg)
             import traceback
             logger.debug(f"详细错误信息: {traceback.format_exc()}")
-            return None
+            return {
+                'success': False,
+                'error': error_msg,
+                'content': None
+            }
 
 
 # 全局服务实例
