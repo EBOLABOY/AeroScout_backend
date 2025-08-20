@@ -1310,16 +1310,42 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 language, departure_code, destination_code, user_preferences
             )
 
+            # 详细记录processed_data的内容
+            logger.info(f"🔍 [AI处理结果] processed_data类型: {type(processed_data)}")
+            if processed_data:
+                logger.info(f"🔍 [AI处理结果] processed_data键: {list(processed_data.keys()) if isinstance(processed_data, dict) else 'Not a dict'}")
+                ai_report = processed_data.get('ai_analysis_report', '')
+                logger.info(f"🔍 [AI处理结果] ai_analysis_report长度: {len(ai_report)}")
+                if ai_report:
+                    preview = ai_report[:200].replace('\n', '\\n')
+                    logger.info(f"🔍 [AI处理结果] ai_analysis_report预览: {preview}")
+                else:
+                    logger.warning("⚠️ [AI处理结果] ai_analysis_report为空！")
+            else:
+                logger.error("❌ [AI处理结果] processed_data为None或False！")
+
             if processed_data and processed_data.get('ai_analysis_report'):
                 # 检查是否是新的Markdown格式
                 if processed_data.get('summary', {}).get('markdown_format'):
                     logger.info(f"✅ AI Markdown分析报告生成成功")
                     logger.info(f"📊 处理了 {len(google_flights) + len(kiwi_flights) + len(ai_flights)} 个原始航班，生成智能分析报告")
+                    # 合并所有原始航班数据
+                    all_flights = []
+                    if google_flights:
+                        all_flights.extend(google_flights)
+                    if kiwi_flights:
+                        all_flights.extend(kiwi_flights)
+                    if ai_flights:
+                        all_flights.extend(ai_flights)
+
+                    logger.info(f"📊 返回 {len(all_flights)} 个原始航班数据")
+
                     return {
                         'success': True,
-                        'flights': [],  # 不返回原始航班数据，用户只需查看AI分析报告
+                        'flights': all_flights,  # 返回所有航班数据
                         'summary': processed_data.get('summary', {}),
                         'ai_analysis_report': processed_data.get('ai_analysis_report', ''),
+                        'total_count': len(all_flights),
                         'processing_info': {
                             'source_counts': {
                                 'regular_search': len(google_flights),
@@ -1355,12 +1381,53 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                         }
                     }
             else:
-                logger.error("AI数据处理失败")
-                return {
-                    'success': False,
-                    'flights': [],
-                    'error': 'AI处理失败'
-                }
+                # AI处理失败或返回空内容时的降级处理
+                logger.warning("⚠️ AI分析报告为空，启用降级处理机制")
+
+                # 统计可用的航班数据
+                total_flights = len(google_flights) + len(kiwi_flights) + len(ai_flights)
+                logger.info(f"📊 降级处理：使用 {total_flights} 个原始航班数据")
+
+                if total_flights > 0:
+                    # 合并所有航班数据
+                    all_flights = []
+
+                    # 添加Google航班
+                    if google_flights:
+                        all_flights.extend(google_flights)
+                        logger.info(f"📊 降级处理：添加 {len(google_flights)} 个Google航班")
+
+                    # 添加Kiwi航班
+                    if kiwi_flights:
+                        all_flights.extend(kiwi_flights)
+                        logger.info(f"📊 降级处理：添加 {len(kiwi_flights)} 个Kiwi航班")
+
+                    # 添加AI推荐航班
+                    if ai_flights:
+                        all_flights.extend(ai_flights)
+                        logger.info(f"📊 降级处理：添加 {len(ai_flights)} 个AI推荐航班")
+
+                    # 生成基本的分析报告
+                    fallback_report = self._generate_fallback_analysis_report(
+                        all_flights, search_params, user_preferences
+                    )
+
+                    logger.info(f"✅ 降级处理完成：生成基本分析报告，包含 {len(all_flights)} 个航班")
+
+                    return {
+                        'success': True,
+                        'flights': all_flights,
+                        'ai_analysis_report': fallback_report,
+                        'total_count': len(all_flights),
+                        'fallback_mode': True  # 标记为降级模式
+                    }
+                else:
+                    logger.error("❌ 降级处理失败：没有可用的航班数据")
+                    return {
+                        'success': False,
+                        'flights': [],
+                        'error': '未找到航班数据'
+                    }
 
         except Exception as e:
             logger.error(f"AI航班数据处理异常: {e}")
@@ -1369,6 +1436,80 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 'flights': [],
                 'error': str(e)
             }
+
+    def _generate_fallback_analysis_report(self, flights: List[dict], search_params: dict, user_preferences: str) -> str:
+        """生成降级模式的基本分析报告"""
+        try:
+            if not flights:
+                return "抱歉，未找到符合条件的航班。"
+
+            # 基本统计
+            total_count = len(flights)
+            departure = search_params.get('departure_code', '')
+            destination = search_params.get('destination_code', '')
+            depart_date = search_params.get('depart_date', '')
+
+            # 价格统计
+            prices = []
+            for flight in flights:
+                try:
+                    price_str = flight.get('price', '0')
+                    if isinstance(price_str, str):
+                        price_str = price_str.replace('$', '').replace(',', '').replace('¥', '').replace('￥', '')
+                    price = float(price_str)
+                    if price > 0:
+                        prices.append(price)
+                except:
+                    continue
+
+            if prices:
+                min_price = min(prices)
+                max_price = max(prices)
+                avg_price = sum(prices) / len(prices)
+            else:
+                min_price = max_price = avg_price = 0
+
+            # 生成基本报告
+            report = f"""# 🛫 航班搜索结果分析
+
+## 📊 搜索概况
+- **航线**: {departure} → {destination}
+- **出发日期**: {depart_date}
+- **找到航班**: {total_count} 个选择
+- **用户偏好**: {user_preferences or '无特殊要求'}
+
+## 💰 价格分析
+"""
+
+            if prices:
+                report += f"""- **最低价格**: ${min_price:.0f}
+- **最高价格**: ${max_price:.0f}
+- **平均价格**: ${avg_price:.0f}
+
+## 🎯 推荐建议
+"""
+                if user_preferences and '便宜' in user_preferences:
+                    report += f"- 根据您的偏好，推荐选择最低价格 ${min_price:.0f} 的航班\n"
+
+                report += f"- 价格区间较大，建议比较不同时间段的航班\n"
+                report += f"- 共找到 {total_count} 个航班选择，请根据时间和价格综合考虑\n"
+            else:
+                report += "- 价格信息暂时无法获取\n"
+
+            report += f"""
+## 📝 说明
+- 数据来源：多个航班搜索平台
+- 价格可能实时变动，请以实际预订为准
+- 建议提前预订以获得更好的价格
+
+*注：由于AI分析服务暂时不可用，以上为基础分析报告*
+"""
+
+            return report
+
+        except Exception as e:
+            logger.error(f"生成降级分析报告失败: {e}")
+            return f"找到 {len(flights)} 个航班选择，请查看具体航班信息。"
 
     def _convert_flight_to_dict(self, flight) -> dict:
         """将FlightResult对象转换为字典格式 - 优化版本"""
@@ -1575,13 +1716,25 @@ You must strictly follow this key principle: The most successful Skiplagging opp
             if result and result.get('success'):
                 model_used = result.get('actual_model', result.get('original_model', 'gemini-2.5-pro'))
                 fallback_used = result.get('fallback_used', False)
+                ai_content = result.get('content', '')
 
                 logger.info(f"✅ AI处理成功，使用模型: {model_used}")
                 if fallback_used:
                     logger.info("🔄 使用了降级机制")
 
+                # 详细记录AI返回的内容
+                logger.info(f"📝 AI返回内容长度: {len(ai_content)} 字符")
+                if ai_content:
+                    # 记录前500个字符用于调试
+                    preview = ai_content[:500].replace('\n', '\\n')
+                    logger.info(f"📝 AI返回内容预览: {preview}")
+                    if len(ai_content) > 500:
+                        logger.info(f"📝 AI返回内容还有 {len(ai_content) - 500} 个字符...")
+                else:
+                    logger.warning("⚠️ AI返回内容为空！")
+
                 return {
-                    'ai_analysis_report': result.get('content', ''),
+                    'ai_analysis_report': ai_content,
                     'summary': {
                         'markdown_format': True,
                         'model_used': model_used,
