@@ -1599,16 +1599,11 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                     language, departure_code, destination_code, user_preferences
                 )
 
-                # 智能选择模型：根据数据量大小选择合适的模型
+                # 使用环境变量配置的AI模型
+                from ..config.settings import AI_MODEL
+                model_name = AI_MODEL
                 payload_size = len(prompt.encode('utf-8'))
-
-                # 大数据量（>50KB）使用pro模型，小数据量使用flash模型
-                if payload_size > 50000:
-                    model_name = "gemini-2.5-pro"
-                    logger.info(f"🧠 大数据量({payload_size:,}字节)，使用强力模型: {model_name}")
-                else:
-                    model_name = "gemini-2.5-flash"
-                    logger.info(f"⚡ 小数据量({payload_size:,}字节)，使用快速模型: {model_name}")
+                logger.info(f"🤖 使用配置的AI模型: {model_name} (数据量: {payload_size:,}字节)")
 
                 result = await self._call_ai_api(prompt, model_name, language, enable_fallback=False)
 
@@ -1735,18 +1730,12 @@ You must strictly follow this key principle: The most successful Skiplagging opp
     async def _call_ai_api(self, prompt: str, model_name: str = None, language: str = "zh", enable_fallback: bool = False) -> Dict:
         """调用AI API进行数据处理，使用环境变量配置的模型"""
 
-        # 智能选择模型配置
+        # 使用环境变量配置的AI模型
         if model_name is None:
-            # 根据prompt大小智能选择模型
+            from ..config.settings import AI_MODEL
+            model_name = AI_MODEL
             payload_size = len(prompt.encode('utf-8'))
-
-            # 大数据量（>50KB）使用pro模型，小数据量使用flash模型
-            if payload_size > 50000:
-                model_name = "gemini-2.5-pro"
-                logger.info(f"🧠 智能选择强力模型: {model_name} (数据量: {payload_size:,}字节)")
-            else:
-                model_name = "gemini-2.5-flash"
-                logger.info(f"⚡ 智能选择快速模型: {model_name} (数据量: {payload_size:,}字节)")
+            logger.info(f"🤖 使用配置的AI模型: {model_name} (数据量: {payload_size:,}字节)")
 
         # 直接调用指定模型（不使用降级机制）
         result = await self._try_ai_api_call_with_retry(prompt, model_name, language)
