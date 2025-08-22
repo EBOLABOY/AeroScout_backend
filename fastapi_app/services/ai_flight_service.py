@@ -9,20 +9,23 @@ AI增强航班搜索服务
 
 import asyncio
 from typing import List, Dict, Any, Optional
+"""
+AI增强航班搜索服务
+
+核心功能：
+1. 三阶段智能搜索（Google Flights + Kiwi + AI推荐）
+2. 隐藏城市机会识别和个性化推荐
+3. 智能数据分析和Markdown展示
+4. 用户个性化搜索体验
+"""
+
+import asyncio
+from typing import List, Dict, Any, Optional
 from loguru import logger
 from datetime import datetime
-current_platform = __import__("platform").system()
 
 # 检查smart-flights库是否可用
 try:
-    # SSL修复已在文件开头完成，这里只记录日志
-    logger.info(f"🖥️ 检测到操作系统: {current_platform}")
-    if current_platform == "Windows":
-        logger.info("🔧 Windows环境：SSL修复已在模块导入时完成")
-    else:
-        logger.info(f"🔒 {current_platform}环境：保持正常SSL验证，不禁用证书检查")
-
-    # 现在导入smart-flights
     from fli.search import SearchFlights
     from fli.models import (
         FlightSearchFilters, FlightSegment, Airport,
@@ -31,7 +34,7 @@ try:
     from fli.models.google_flights.base import LocalizationConfig, Language, Currency
 
     SMART_FLIGHTS_AVAILABLE = True
-    logger.info("smart-flights服务可用")
+    logger.info("✅ smart-flights服务可用")
 except ImportError as e:
     SMART_FLIGHTS_AVAILABLE = False
     logger.warning(f"smart-flights库不可用: {e}")
@@ -50,6 +53,11 @@ class AIFlightService:
             'cache_hits': 0,
             'cache_misses': 0
         }
+        
+        # 初始化测试数据保存器
+        from ..utils.test_data_saver import get_test_data_saver
+        self.test_data_saver = get_test_data_saver()
+        
         logger.info("AIFlightService初始化成功")
 
     async def search_flights_ai_enhanced(
@@ -78,6 +86,24 @@ class AIFlightService:
         try:
             logger.info(f"🚀 开始AI增强航班搜索: {departure_code} → {destination_code}, {depart_date}")
 
+            # 准备搜索参数（用于测试数据保存）
+            search_params = {
+                'departure_code': departure_code,
+                'destination_code': destination_code,
+                'depart_date': depart_date,
+                'return_date': return_date,
+                'adults': adults,
+                'seat_class': seat_class,
+                'children': children,
+                'infants_in_seat': infants_in_seat,
+                'infants_on_lap': infants_on_lap,
+                'max_stops': max_stops,
+                'sort_by': sort_by,
+                'language': language,
+                'currency': currency,
+                'user_preferences': user_preferences
+            }
+
             # 根据行程类型决定搜索阶段
             is_roundtrip = return_date is not None
 
@@ -101,6 +127,16 @@ class AIFlightService:
                 # 并行执行两个搜索任务
                 google_flights_raw, kiwi_flights_raw = await asyncio.gather(*tasks)
                 ai_flights_raw = []  # 往返航班不使用AI推荐隐藏城市
+
+                # 🧪 保存各阶段原始数据（测试模式）
+                self.test_data_saver.save_stage_data(
+                    "google_flights", google_flights_raw, search_params,
+                    {"stage": "1", "description": "Google Flights搜索结果", "is_roundtrip": True}
+                )
+                self.test_data_saver.save_stage_data(
+                    "kiwi_flights", kiwi_flights_raw, search_params,
+                    {"stage": "2", "description": "Kiwi航班搜索结果", "is_roundtrip": True}
+                )
 
                 logger.info(f"两阶段原始数据收集完成: Google({len(google_flights_raw)}), Kiwi({len(kiwi_flights_raw)})")
             else:
@@ -127,8 +163,29 @@ class AIFlightService:
                 # 并行执行所有搜索任务
                 google_flights_raw, kiwi_flights_raw, ai_flights_raw = await asyncio.gather(*tasks)
 
+                # 🧪 保存各阶段原始数据（测试模式）
+                self.test_data_saver.save_stage_data(
+                    "google_flights", google_flights_raw, search_params,
+                    {"stage": "1", "description": "Google Flights搜索结果", "is_roundtrip": False}
+                )
+                self.test_data_saver.save_stage_data(
+                    "kiwi_flights", kiwi_flights_raw, search_params,
+                    {"stage": "2", "description": "Kiwi航班搜索结果", "is_roundtrip": False}
+                )
+                self.test_data_saver.save_stage_data(
+                    "ai_recommended", ai_flights_raw, search_params,
+                    {"stage": "3", "description": "AI推荐隐藏城市搜索结果", "is_roundtrip": False}
+                )
+
             # 交给AI处理
             logger.info("🤖 将原始数据交给AI处理")
+            
+            # 🧪 保存发送给AI的整合数据（测试模式）
+            self.test_data_saver.save_ai_input_data(
+                google_flights_raw, kiwi_flights_raw, ai_flights_raw,
+                search_params, user_preferences
+            )
+            
             ai_processed_result = await self._process_flights_with_ai(
                 google_flights=google_flights_raw,
                 kiwi_flights=kiwi_flights_raw,
@@ -141,6 +198,13 @@ class AIFlightService:
 
             if ai_processed_result['success']:
                 logger.info("✅ AI处理成功，生成详细分析报告")
+                
+                # 🧪 保存AI输出数据（测试模式）
+                self.test_data_saver.save_ai_output_data(
+                    ai_processed_result, search_params,
+                    {"processing_method": "ai_enhanced", "stage_count": 3 if not is_roundtrip else 2}
+                )
+                
                 return {
                     'success': True,
                     'data': {'itineraries': []},  # 不返回原始航班数据
