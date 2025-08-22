@@ -78,6 +78,11 @@ def get_consolidated_instructions_prompt(language: str = "zh") -> str:
 - **表格列**: `排名 | 航班号 | 价格 | 舱位 | 出发时间 | 到达时间 | 总时长 | 真实完整路径 | 隐藏类型 | 航空公司 | 风险提示`
 - **重要要求**:
   - **【关键】必须在"真实完整路径"列显示完整的真实航线，包括最终目的地（如：LHR→PEK→CAN表示用户在PEK下机）**
+  - **【关键】路径显示规则**：
+    - 从航班数据中的`route_path`字段提取完整路径
+    - 如果有`legs`字段，构建完整路径：起点→中转点→终点
+    - 如果有`hidden_destination_code`，必须显示到该隐藏终点的完整路径
+    - 绝对不可省略任何中转点或最终目的地
   - **【关键】识别标准：任何包含`is_hidden_city: true`或`ai_recommended: true`的航班都应被识别为隐藏城市航班**
   - **【关键】对于AI推荐的航班（如LHR→PEK→CAN），这是有效的隐藏城市航班，用户在PEK下机，CAN是隐藏的最终目的地**
   - 在"隐藏类型"列标注"隐藏城市直飞"或"隐藏城市中转"或"AI推荐隐藏城市"
@@ -183,6 +188,11 @@ def get_consolidated_instructions_prompt(language: str = "zh") -> str:
 - **Table Columns**: `Rank | Flight No. | Price | Cabin | Departs | Arrives | Duration | True Complete Route | Hidden Type | Airline | Risk Warning`
 - **Important Requirements**:
   - **【KEY】Must show complete true route in "True Complete Route" column, including final destination (e.g., LHR→PEK→CAN means user exits at PEK)**
+  - **【KEY】Route Display Rules**：
+    - Extract complete route from flight data's `route_path` field
+    - If `legs` field exists, construct complete route: origin→layover→destination
+    - If `hidden_destination_code` exists, must show complete route to that hidden destination
+    - Absolutely cannot omit any layover points or final destinations
   - **【KEY】Identification Standard: Any flight with `is_hidden_city: true` or `ai_recommended: true` should be identified as hidden city flight**
   - **【KEY】For AI recommended flights (e.g., LHR→PEK→CAN), this is a valid hidden city flight where user exits at PEK, CAN is the hidden final destination**
   - Mark "Hidden City Direct" or "Hidden City Connecting" or "AI Recommended Hidden City" in "Hidden Type" column

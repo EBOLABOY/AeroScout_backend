@@ -1036,7 +1036,11 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                     'airline', 'flightNumber', 'departureTime', 'arrivalTime',
                     'duration', 'stops', 'isDirect', 'stopsText', 'price', 'currency',
                     'legs', 'departure_airport', 'arrival_airport', 'total_price',
-                    'hidden_city_info', 'is_hidden_city', 'ai_recommended'
+                    # 隐藏城市和路径信息
+                    'hidden_city_info', 'is_hidden_city', 'ai_recommended',
+                    'hidden_destination_code', 'hidden_destination_name',
+                    # 路径信息 - 关键：AI推荐航班需要显示完整路径
+                    'route_path', 'route_description', 'segment_count', 'route_segments'
                 }
             }
 
@@ -1471,12 +1475,18 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                     legs = getattr(flight, 'legs', [])
                     if legs:
                         legs_data = []
+                        route_path = []  # 构建路径信息
                         for leg in legs:
                             leg_dict = {}
                             if hasattr(leg, 'origin') and hasattr(leg.origin, 'displayCode'):
-                                leg_dict['origin'] = leg.origin.displayCode
+                                origin_code = leg.origin.displayCode
+                                leg_dict['origin'] = origin_code
+                                if not route_path:  # 第一个航段的起点
+                                    route_path.append(origin_code)
                             if hasattr(leg, 'destination') and hasattr(leg.destination, 'displayCode'):
-                                leg_dict['destination'] = leg.destination.displayCode
+                                dest_code = leg.destination.displayCode
+                                leg_dict['destination'] = dest_code
+                                route_path.append(dest_code)  # 每个航段的终点
                             if hasattr(leg, 'departure'):
                                 leg_dict['departure'] = leg.departure
                             if hasattr(leg, 'arrival'):
@@ -1484,7 +1494,25 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                             if hasattr(leg, 'durationInMinutes'):
                                 leg_dict['duration'] = leg.durationInMinutes
                             legs_data.append(leg_dict)
+                        
                         flight_dict['legs'] = legs_data
+                        
+                        # 构建完整路径信息 - 关键：AI推荐航班需要显示完整路径
+                        if route_path:
+                            flight_dict['route_path'] = ' → '.join(route_path)
+                            flight_dict['segment_count'] = len(legs_data)
+                            
+                            # 构建路径描述
+                            route_segments = []
+                            for leg_dict in legs_data:
+                                route_segments.append({
+                                    'from': leg_dict.get('origin', ''),
+                                    'to': leg_dict.get('destination', ''),
+                                    'carrier': flight_dict.get('airline', ''),
+                                    'flight_number': flight_dict.get('flightNumber', '')
+                                })
+                            flight_dict['route_segments'] = route_segments
+                            flight_dict['route_description'] = self._build_route_description(route_segments)
                     else:
                         flight_dict['legs'] = []
                 else:
