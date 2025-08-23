@@ -554,15 +554,15 @@ class FlightDataFilter:
         for flight_data in raw_flights:
             cleaned_flight = None
             
-            # 首先检查是否为Pydantic模型（FlightResult等）
+            # 处理不同类型的flight对象
             if hasattr(flight_data, 'model_dump'):
-                # 转换为字典格式进行处理
+                # Pydantic模型（本项目的FlightResult）
                 flight_dict = flight_data.model_dump()
                 logger.debug(f"🔄 [数据转换] 检测到Pydantic模型，转换为字典: {type(flight_data)} → dict")
                 
                 # 对转换后的字典进行相应的清理
                 if data_source == 'google_flights':
-                    cleaned_flight = flight_dict  # Google Flights字典格式，直接使用
+                    cleaned_flight = flight_dict
                 elif data_source == 'kiwi':
                     cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
                 elif data_source == 'ai_recommended':
@@ -570,6 +570,32 @@ class FlightDataFilter:
                     if cleaned_flight:
                         cleaned_flight['source'] = self.source_mapping['ai_recommended']
                         
+            elif hasattr(flight_data, '__dict__') and not isinstance(flight_data, (str, dict, list, int, float)):
+                # 外部库对象（如fli.models.google_flights.base.FlightResult）
+                try:
+                    # 尝试转换为字典格式
+                    if hasattr(flight_data, 'to_dict'):
+                        flight_dict = flight_data.to_dict()
+                    elif hasattr(flight_data, '__dict__'):
+                        flight_dict = vars(flight_data)
+                    else:
+                        flight_dict = {}
+                        
+                    logger.debug(f"🔄 [数据转换] 检测到外部对象，转换为字典: {type(flight_data)} → dict")
+                    
+                    # 对转换后的字典进行相应的清理
+                    if data_source == 'google_flights':
+                        cleaned_flight = flight_dict
+                    elif data_source == 'kiwi':
+                        cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
+                    elif data_source == 'ai_recommended':
+                        cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
+                        if cleaned_flight:
+                            cleaned_flight['source'] = self.source_mapping['ai_recommended']
+                            
+                except Exception as e:
+                    logger.warning(f"⚠️ [{data_source}] 外部对象转换失败: {type(flight_data)} - {e}")
+                    
             elif data_source == 'google_flights':
                 if isinstance(flight_data, str):
                     # Google Flights字符串格式数据
