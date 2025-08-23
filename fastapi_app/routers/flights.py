@@ -978,25 +978,31 @@ async def stream_task_status(
             if not task_info:
                 # 发送错误事件并立即关闭连接
                 error_data = {
-                    "status": "ERROR",
-                    "message": "任务不存在",
+                    "status": "TASK_NOT_FOUND",
+                    "message": "任务不存在或已过期",
                     "error_code": "TASK_NOT_FOUND",
-                    "task_id": task_id
+                    "task_id": task_id,
+                    "final": True  # 明确标记这是最终消息
                 }
                 logger.warning(f"⚠️ SSE任务不存在: {task_id}")
                 yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
-                yield f"event: close\ndata: {json.dumps({'message': '任务不存在，连接关闭'}, ensure_ascii=False)}\n\n"
+                # 发送明确的终止事件
+                yield f"event: error\ndata: {json.dumps({'error': 'TASK_NOT_FOUND', 'final': True}, ensure_ascii=False)}\n\n"
+                yield f"event: close\ndata: {json.dumps({'message': '任务不存在，连接关闭', 'final': True}, ensure_ascii=False)}\n\n"
                 return
 
             # 检查任务所有权（游客可访问）
             if current_user and task_info.get("user_id") != current_user.id:
                 if task_info.get("user_id") != "guest":
                     error_data = {
-                        "status": "ERROR",
+                        "status": "ACCESS_DENIED",
                         "message": "无权访问此任务",
-                        "error_code": "ACCESS_DENIED"
+                        "error_code": "ACCESS_DENIED",
+                        "final": True
                     }
                     yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                    yield f"event: error\ndata: {json.dumps({'error': 'ACCESS_DENIED', 'final': True}, ensure_ascii=False)}\n\n"
+                    yield f"event: close\ndata: {json.dumps({'message': '权限不足，连接关闭', 'final': True}, ensure_ascii=False)}\n\n"
                     return
 
             # 发送初始状态
@@ -1024,7 +1030,8 @@ async def stream_task_status(
                             "progress": 100,
                             "message": "任务完成",
                             "task_id": task_id,
-                            "result": result  # 直接发送原始结果，让前端处理数据结构
+                            "result": result,  # 直接发送原始结果，让前端处理数据结构
+                            "final": True  # 明确标记为最终消息
                         }
                         logger.info(f"📤 SSE发送完成结果: {task_id}")
                         logger.info(f"📊 结果包含: {len(result.get('flights', []))} 个航班, AI报告长度: {len(result.get('ai_analysis_report', ''))}")
@@ -1033,7 +1040,7 @@ async def stream_task_status(
                     logger.error(f"❌ SSE获取任务结果失败: {e}")
 
                 # 发送结束事件
-                yield f"event: close\ndata: {json.dumps({'message': '任务已完成'}, ensure_ascii=False)}\n\n"
+                yield f"event: close\ndata: {json.dumps({'message': '任务已完成', 'final': True}, ensure_ascii=False)}\n\n"
                 return
 
             # 如果任务失败，发送错误并结束
@@ -1043,11 +1050,13 @@ async def stream_task_status(
                     "progress": 0,
                     "message": task_info.get("message", "任务失败"),
                     "task_id": task_id,
-                    "error": task_info.get("error", "未知错误")
+                    "error": task_info.get("error", "未知错误"),
+                    "final": True
                 }
                 logger.info(f"📤 SSE发送失败状态: {task_id}")
                 yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
-                yield f"event: close\ndata: {json.dumps({'message': '任务已失败'}, ensure_ascii=False)}\n\n"
+                yield f"event: error\ndata: {json.dumps({'error': 'TASK_FAILED', 'final': True}, ensure_ascii=False)}\n\n"
+                yield f"event: close\ndata: {json.dumps({'message': '任务失败，连接关闭', 'final': True}, ensure_ascii=False)}\n\n"
                 return
 
             # 轮询任务状态变化
@@ -1065,15 +1074,27 @@ async def stream_task_status(
                         timeout_data = {
                             "status": "TIMEOUT",
                             "message": "任务超时",
-                            "task_id": task_id
+                            "task_id": task_id,
+                            "final": True
                         }
                         yield f"data: {json.dumps(timeout_data, ensure_ascii=False)}\n\n"
-                        yield f"event: close\ndata: {json.dumps({'message': '任务超时'}, ensure_ascii=False)}\n\n"
+                        yield f"event: error\ndata: {json.dumps({'error': 'TIMEOUT', 'final': True}, ensure_ascii=False)}\n\n"
+                        yield f"event: close\ndata: {json.dumps({'message': '任务超时，连接关闭', 'final': True}, ensure_ascii=False)}\n\n"
                         break
 
                     # 获取最新任务状态
                     current_task_info = await async_task_service.get_task_info(task_id)
                     if not current_task_info:
+                        # 任务在轮询过程中被删除
+                        error_data = {
+                            "status": "TASK_NOT_FOUND",
+                            "message": "任务已被删除或过期",
+                            "task_id": task_id,
+                            "final": True
+                        }
+                        yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                        yield f"event: error\ndata: {json.dumps({'error': 'TASK_DELETED', 'final': True}, ensure_ascii=False)}\n\n"
+                        yield f"event: close\ndata: {json.dumps({'message': '任务已删除，连接关闭', 'final': True}, ensure_ascii=False)}\n\n"
                         break
 
                     current_status = current_task_info.get("status", "PENDING")
@@ -1117,7 +1138,8 @@ async def stream_task_status(
                                     "progress": 100,
                                     "message": "任务完成",
                                     "task_id": task_id,
-                                    "result": result  # 直接发送原始结果，让前端处理数据结构
+                                    "result": result,  # 直接发送原始结果，让前端处理数据结构
+                                    "final": True
                                 }
                                 logger.info(f"📤 SSE发送最终结果: {task_id}")
                                 logger.info(f"📊 结果包含: {len(result.get('flights', []))} 个航班, AI报告长度: {len(result.get('ai_analysis_report', ''))}")
@@ -1126,7 +1148,7 @@ async def stream_task_status(
                             logger.error(f"❌ SSE获取最终结果失败: {e}")
 
                         # 发送结束事件
-                        yield f"event: close\ndata: {json.dumps({'message': '任务完成'}, ensure_ascii=False)}\n\n"
+                        yield f"event: close\ndata: {json.dumps({'message': '任务完成', 'final': True}, ensure_ascii=False)}\n\n"
                         break
 
                     # 如果任务失败，发送错误并结束
@@ -1136,11 +1158,13 @@ async def stream_task_status(
                             "progress": 0,
                             "message": current_message,
                             "task_id": task_id,
-                            "error": current_task_info.get("error", "未知错误")
+                            "error": current_task_info.get("error", "未知错误"),
+                            "final": True
                         }
                         logger.info(f"📤 SSE发送失败结果: {task_id}")
                         yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
-                        yield f"event: close\ndata: {json.dumps({'message': '任务失败'}, ensure_ascii=False)}\n\n"
+                        yield f"event: error\ndata: {json.dumps({'error': 'TASK_FAILED', 'final': True}, ensure_ascii=False)}\n\n"
+                        yield f"event: close\ndata: {json.dumps({'message': '任务失败', 'final': True}, ensure_ascii=False)}\n\n"
                         break
 
                     # 等待2秒后再次检查
