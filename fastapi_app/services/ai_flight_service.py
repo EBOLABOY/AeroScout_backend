@@ -77,16 +77,17 @@ class AIFlightService:
         sort_by: str = "CHEAPEST",
         language: str = "zh",
         currency: str = "CNY",
-        user_preferences: str = ""
+        user_preferences: str = "",
+        is_guest_user: bool = False
     ) -> dict:
         """
         AI增强航班搜索：
-        1. 收集三阶段原始数据
-        2. 交给AI处理
-        3. 返回Markdown报告
+        - 游客用户：仅执行第二阶段（Kiwi搜索 → AI分析）
+        - 登录用户：执行完整三阶段搜索（Google Flights + Kiwi + AI推荐 → AI分析）
         """
         try:
-            logger.info(f"开始AI增强搜索: {departure_code} → {destination_code}")
+            user_type = "游客" if is_guest_user else "登录用户"
+            logger.info(f"开始AI增强搜索: {departure_code} → {destination_code} (用户类型: {user_type})")
 
             # 准备搜索参数（用于测试数据保存）
             search_params = {
@@ -103,14 +104,30 @@ class AIFlightService:
                 'sort_by': sort_by,
                 'language': language,
                 'currency': currency,
-                'user_preferences': user_preferences
+                'user_preferences': user_preferences,
+                'is_guest_user': is_guest_user
             }
 
-            # 根据行程类型决定搜索阶段
+            # 根据用户类型和行程类型决定搜索策略
             is_roundtrip = return_date is not None
 
-            if is_roundtrip:
-                logger.info("执行两阶段搜索（往返航班）")
+            if is_guest_user:
+                logger.info("🎯 游客用户 - 执行简化搜索（仅第二阶段：Kiwi搜索）")
+                
+                # 游客用户：仅执行第二阶段（Kiwi搜索）
+                kiwi_flights_raw = await self._get_kiwi_raw_data(
+                    departure_code, destination_code, depart_date, return_date, 
+                    adults, seat_class, language, currency
+                )
+                
+                # 空的第一阶段和第三阶段数据
+                google_flights_raw = []
+                ai_flights_raw = []
+                
+                logger.info(f"游客搜索完成: Kiwi({len(kiwi_flights_raw)}) 条航班")
+                
+            elif is_roundtrip:
+                logger.info("✈️ 登录用户 - 执行两阶段搜索（往返航班：Google + Kiwi）")
 
                 tasks = [
                     # 阶段1: 获取Google Flights原始数据
@@ -129,9 +146,9 @@ class AIFlightService:
                 google_flights_raw, kiwi_flights_raw = await asyncio.gather(*tasks)
                 ai_flights_raw = []
 
-                logger.info(f"数据收集完成: Google({len(google_flights_raw)}), Kiwi({len(kiwi_flights_raw)})")
+                logger.info(f"登录用户往返搜索完成: Google({len(google_flights_raw)}), Kiwi({len(kiwi_flights_raw)})")
             else:
-                logger.info("执行三阶段搜索（单程航班）")
+                logger.info("🚀 登录用户 - 执行三阶段搜索（单程航班：Google + Kiwi + AI推荐）")
 
                 tasks = [
                     # 阶段1: 获取Google Flights原始数据
@@ -153,6 +170,8 @@ class AIFlightService:
                 # 并行执行所有搜索任务
                 google_flights_raw, kiwi_flights_raw, ai_flights_raw = await asyncio.gather(*tasks)
 
+                logger.info(f"登录用户单程搜索完成: Google({len(google_flights_raw)}), Kiwi({len(kiwi_flights_raw)}), AI({len(ai_flights_raw)})")
+
             # 交给AI处理
             logger.info("开始AI处理")
             
@@ -168,6 +187,9 @@ class AIFlightService:
 
             if ai_processed_result['success']:
                 logger.info("AI处理成功")
+                
+                # 根据用户类型确定搜索模式
+                search_mode = "guest_kiwi_only" if is_guest_user else ("full_three_stage" if not is_roundtrip else "registered_two_stage")
                 
                 return {
                     'success': True,
@@ -185,7 +207,14 @@ class AIFlightService:
                         'search_time': datetime.now().isoformat(),
                         'departure_code': departure_code,
                         'destination_code': destination_code,
-                        'processing_method': 'ai_markdown_only'
+                        'processing_method': 'ai_markdown_only',
+                        'user_type': user_type,
+                        'search_mode': search_mode,
+                        'stages_executed': {
+                            'google_flights': len(google_flights_raw) > 0,
+                            'kiwi_flights': len(kiwi_flights_raw) > 0,
+                            'ai_recommendations': len(ai_flights_raw) > 0
+                        }
                     }
                 }
             else:

@@ -552,21 +552,24 @@ async def search_flights_ai_enhanced(
     language: str = Query("zh", description="语言设置 (zh/en)"),
     currency: str = Query("CNY", description="货币设置 (CNY/USD)"),
     user_preferences: str = Query("", description="用户偏好和要求（如：我想要最便宜的航班、希望直飞、早上出发等）"),
-    current_user: UserInfo = Depends(get_current_active_user)
+    current_user: Optional[UserInfo] = Depends(get_current_user_optional)
 ):
     """
-    AI增强的航班搜索
+    AI增强的航班搜索 - 支持游客和登录用户
 
-    执行三阶段搜索（Google Flights + Kiwi + AI分析），然后使用AI清洗和本地化数据
+    执行差异化搜索策略：
+    - 🎯 游客用户：简化搜索（仅Kiwi + AI分析）
+    - 🚀 登录用户：完整搜索（Google Flights + Kiwi + AI推荐 + AI分析）
 
     特点：
     - 🤖 AI智能数据清洗和本地化
-    - 🔍 三阶段全面搜索
+    - 🔍 差异化搜索策略
     - 🌐 根据语言设置自动本地化机场名称
     - 📊 去重和数据统一
     """
     try:
-        logger.info(f"🤖 用户 {current_user.username} 开始AI增强航班搜索: {departure_code} -> {destination_code}, {depart_date}")
+        user_display = current_user.username if current_user else "游客"
+        logger.info(f"🤖 用户 {user_display} 开始AI增强航班搜索: {departure_code} -> {destination_code}, {depart_date}")
 
         # 验证必需参数
         if not all([departure_code, destination_code, depart_date]):
@@ -607,7 +610,8 @@ async def search_flights_ai_enhanced(
             sort_by=sort_by.value,
             language=language,
             currency=currency,
-            user_preferences=user_preferences
+            user_preferences=user_preferences,
+            is_guest_user=current_user is None  # 关键：判断是否为游客用户
         )
 
         logger.info(f"AI增强搜索完成: 成功={result['success']}, 总结果数={result.get('total_count', 0)}")
@@ -717,7 +721,8 @@ async def start_ai_enhanced_search_async(
             "sort_by": sort_by.value,
             "language": language,
             "currency": currency,
-            "user_preferences": user_preferences
+            "user_preferences": user_preferences,
+            "is_guest_user": current_user is None  # 关键：判断是否为游客用户
         }
 
         # 创建异步任务
@@ -927,7 +932,8 @@ async def _execute_ai_search_background(task_id: str, search_params: Dict[str, A
             sort_by=search_params["sort_by"],
             language=search_params["language"],
             currency=search_params["currency"],
-            user_preferences=search_params["user_preferences"]
+            user_preferences=search_params["user_preferences"],
+            is_guest_user=search_params.get("is_guest_user", False)
         )
 
         # 保存搜索结果
