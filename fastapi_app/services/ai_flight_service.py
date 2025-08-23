@@ -1345,10 +1345,24 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                     import json
                     
                     # 计算原始数据大小（用JSON字符串长度）
+                    def safe_json_size(data):
+                        """安全计算数据的JSON序列化大小"""
+                        if not data:
+                            return 0
+                        try:
+                            # 如果是Pydantic模型列表，转换为字典
+                            if isinstance(data, list) and data and hasattr(data[0], 'model_dump'):
+                                serializable_data = [item.model_dump() if hasattr(item, 'model_dump') else item for item in data]
+                            else:
+                                serializable_data = data
+                            return len(json.dumps(serializable_data, ensure_ascii=False, default=str))
+                        except Exception:
+                            return 0
+                    
                     original_data_size = {
-                        'google_size': len(json.dumps(google_flights, ensure_ascii=False)) if google_flights else 0,
-                        'kiwi_size': len(json.dumps(kiwi_flights, ensure_ascii=False)) if kiwi_flights else 0,
-                        'ai_size': len(json.dumps(ai_flights, ensure_ascii=False)) if ai_flights else 0
+                        'google_size': safe_json_size(google_flights),
+                        'kiwi_size': safe_json_size(kiwi_flights),
+                        'ai_size': safe_json_size(ai_flights)
                     }
                     
                     # 清理多源数据的冗余字段
@@ -1360,9 +1374,9 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                     
                     # 计算清理后数据大小（用JSON字符串长度）
                     cleaned_data_size = {
-                        'google_size': len(json.dumps(cleaned_data.get('google_flights', []), ensure_ascii=False)),
-                        'kiwi_size': len(json.dumps(cleaned_data.get('kiwi_flights', []), ensure_ascii=False)),
-                        'ai_size': len(json.dumps(cleaned_data.get('ai_flights', []), ensure_ascii=False))
+                        'google_size': safe_json_size(cleaned_data.get('google_flights', [])),
+                        'kiwi_size': safe_json_size(cleaned_data.get('kiwi_flights', [])),
+                        'ai_size': safe_json_size(cleaned_data.get('ai_flights', []))
                     }
                     
                     # 计算压缩效果
