@@ -140,6 +140,134 @@ class FlightDataFilter:
             logger.warning(f"清理Google Flights数据失败: {e}")
             return None
     
+    def clean_google_flight_dict_data(self, flight_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        清理Google Flights字典数据，专门处理外部库FlightResult转换后的字典
+        针对Google Flights数据结构优化，移除冗余字段
+        
+        Args:
+            flight_data: Google Flights原始字典数据
+            
+        Returns:
+            清理后的核心航班信息字典
+        """
+        try:
+            # 提取核心航班信息
+            cleaned_data = {
+                'source': self.source_mapping['google_flights'],
+                'price': self._extract_price_info(flight_data),
+                'currency': self._extract_currency(flight_data),
+                'departure_time': self._extract_departure_time(flight_data),
+                'arrival_time': self._extract_arrival_time(flight_data),
+                'duration_minutes': self._extract_duration(flight_data),
+                'stops': self._extract_stops(flight_data),
+                'route': self._extract_route_info(flight_data),
+                'legs': self._extract_simplified_legs(flight_data)
+            }
+            
+            # 移除所有为None的字段，保持数据简洁
+            cleaned_data = {k: v for k, v in cleaned_data.items() if v is not None}
+            
+            return cleaned_data
+            
+        except Exception as e:
+            logger.warning(f"清理Google Flights字典数据失败: {e}")
+            # 降级处理：保留基本字段
+            return {
+                'source': self.source_mapping['google_flights'],
+                'price': flight_data.get('price', 0),
+                'legs': flight_data.get('legs', [])
+            }
+    
+    def _extract_price_info(self, flight_data: Dict[str, Any]) -> float:
+        """提取价格信息"""
+        price = flight_data.get('price')
+        if isinstance(price, dict):
+            return price.get('amount', 0)
+        elif isinstance(price, (int, float)):
+            return price
+        return 0
+    
+    def _extract_currency(self, flight_data: Dict[str, Any]) -> str:
+        """提取货币信息"""
+        price = flight_data.get('price')
+        if isinstance(price, dict):
+            return price.get('currency', 'USD')
+        return flight_data.get('currency', 'USD')
+    
+    def _extract_departure_time(self, flight_data: Dict[str, Any]) -> str:
+        """提取出发时间"""
+        legs = flight_data.get('legs', [])
+        if legs and len(legs) > 0:
+            first_leg = legs[0]
+            if isinstance(first_leg, dict):
+                return first_leg.get('departure_time', '')
+        return flight_data.get('departure_time', '')
+    
+    def _extract_arrival_time(self, flight_data: Dict[str, Any]) -> str:
+        """提取到达时间"""
+        legs = flight_data.get('legs', [])
+        if legs and len(legs) > 0:
+            last_leg = legs[-1]
+            if isinstance(last_leg, dict):
+                return last_leg.get('arrival_time', '')
+        return flight_data.get('arrival_time', '')
+    
+    def _extract_duration(self, flight_data: Dict[str, Any]) -> int:
+        """提取飞行时长"""
+        return flight_data.get('duration_minutes', 0) or flight_data.get('total_duration', 0)
+    
+    def _extract_stops(self, flight_data: Dict[str, Any]) -> int:
+        """提取中转次数"""
+        legs = flight_data.get('legs', [])
+        if legs:
+            return max(0, len(legs) - 1)  # 航段数-1 = 中转次数
+        return flight_data.get('stops', 0)
+    
+    def _extract_route_info(self, flight_data: Dict[str, Any]) -> str:
+        """提取航线信息"""
+        legs = flight_data.get('legs', [])
+        if legs and len(legs) > 0:
+            first_leg = legs[0]
+            last_leg = legs[-1]
+            if isinstance(first_leg, dict) and isinstance(last_leg, dict):
+                departure = first_leg.get('departure_airport', '')
+                arrival = last_leg.get('arrival_airport', '')
+                if departure and arrival:
+                    return f"{departure} → {arrival}"
+        return ''
+    
+    def _extract_simplified_legs(self, flight_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """提取简化的航段信息，移除冗余字段"""
+        legs = flight_data.get('legs', [])
+        simplified_legs = []
+        
+        for leg in legs:
+            if isinstance(leg, dict):
+                simplified_leg = {
+                    'airline': self._extract_airline_name(leg),
+                    'flight_number': leg.get('flight_number', ''),
+                    'departure_airport': leg.get('departure_airport', ''),
+                    'arrival_airport': leg.get('arrival_airport', ''),
+                    'departure_time': leg.get('departure_time', ''),
+                    'arrival_time': leg.get('arrival_time', ''),
+                    'duration_minutes': leg.get('duration_minutes', 0)
+                }
+                # 移除None和空字符串
+                simplified_leg = {k: v for k, v in simplified_leg.items() if v}
+                simplified_legs.append(simplified_leg)
+        
+        return simplified_legs
+    
+    def _extract_airline_name(self, leg_data: Dict[str, Any]) -> str:
+        """提取航空公司名称"""
+        airline = leg_data.get('airline')
+        if isinstance(airline, dict):
+            return airline.get('name', '')
+        elif isinstance(airline, str):
+            return airline
+        return ''
+
     def clean_kiwi_flight_data(self, flight_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         清理Kiwi航班数据，删除冗余字段，保留核心信息
@@ -567,11 +695,8 @@ class FlightDataFilter:
                 
                 # 对转换后的字典进行相应的清理
                 if data_source == 'google_flights':
-                    # Google Flights数据也需要清理冗余字段
-                    cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
-                    # 确保source字段正确
-                    if cleaned_flight:
-                        cleaned_flight['source'] = self.source_mapping['google_flights']
+                    # Google Flights使用专门的清理方法
+                    cleaned_flight = self.clean_google_flight_dict_data(flight_dict)
                 elif data_source == 'kiwi':
                     cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
                 elif data_source == 'ai_recommended':
@@ -594,11 +719,8 @@ class FlightDataFilter:
                     
                     # 对转换后的字典进行相应的清理
                     if data_source == 'google_flights':
-                        # Google Flights数据也需要清理冗余字段
-                        cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
-                        # 确保source字段正确
-                        if cleaned_flight:
-                            cleaned_flight['source'] = self.source_mapping['google_flights']
+                        # Google Flights使用专门的清理方法
+                        cleaned_flight = self.clean_google_flight_dict_data(flight_dict)
                     elif data_source == 'kiwi':
                         cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
                     elif data_source == 'ai_recommended':
