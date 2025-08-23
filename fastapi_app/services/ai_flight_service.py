@@ -1138,8 +1138,9 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                     cleaned_data.append(item)
 
             # 记录清理效果
-            original_size = len(str(data))
-            cleaned_size = len(str(cleaned_data))
+            import json
+            original_size = len(json.dumps(data, ensure_ascii=False)) if data else 0
+            cleaned_size = len(json.dumps(cleaned_data, ensure_ascii=False))
             reduction_percent = (1 - cleaned_size / original_size) * 100 if original_size > 0 else 0
 
             logger.info(f"🧹 [数据清理] {data_type}数据: {len(data)}条 → {len(cleaned_data)}条")
@@ -1341,11 +1342,13 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 logger.info("🧹 [数据清理] 开始清理航班数据冗余字段")
                 
                 try:
-                    # 计算原始数据大小（用于对比）
+                    import json
+                    
+                    # 计算原始数据大小（用JSON字符串长度）
                     original_data_size = {
-                        'google_size': len(str(google_flights)),
-                        'kiwi_size': len(str(kiwi_flights)),
-                        'ai_size': len(str(ai_flights))
+                        'google_size': len(json.dumps(google_flights, ensure_ascii=False)) if google_flights else 0,
+                        'kiwi_size': len(json.dumps(kiwi_flights, ensure_ascii=False)) if kiwi_flights else 0,
+                        'ai_size': len(json.dumps(ai_flights, ensure_ascii=False)) if ai_flights else 0
                     }
                     
                     # 清理多源数据的冗余字段
@@ -1355,11 +1358,11 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                         ai_flights=ai_flights
                     )
                     
-                    # 计算清理后数据大小
+                    # 计算清理后数据大小（用JSON字符串长度）
                     cleaned_data_size = {
-                        'google_size': len(str(cleaned_data.get('google_flights', []))),
-                        'kiwi_size': len(str(cleaned_data.get('kiwi_flights', []))),
-                        'ai_size': len(str(cleaned_data.get('ai_flights', [])))
+                        'google_size': len(json.dumps(cleaned_data.get('google_flights', []), ensure_ascii=False)),
+                        'kiwi_size': len(json.dumps(cleaned_data.get('kiwi_flights', []), ensure_ascii=False)),
+                        'ai_size': len(json.dumps(cleaned_data.get('ai_flights', []), ensure_ascii=False))
                     }
                     
                     # 计算压缩效果

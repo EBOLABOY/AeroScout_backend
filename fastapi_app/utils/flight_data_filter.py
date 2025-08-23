@@ -593,9 +593,10 @@ class FlightDataFilter:
         )
         self.statistics['processing_time'] = (datetime.now() - start_time).total_seconds()
         
-        # 计算数据压缩效果
-        original_size = len(str(raw_flights))
-        cleaned_size = len(str(cleaned_flights))
+        # 计算数据压缩效果（使用JSON字符串长度）
+        import json
+        original_size = len(json.dumps(raw_flights, ensure_ascii=False)) if raw_flights else 0
+        cleaned_size = len(json.dumps(cleaned_flights, ensure_ascii=False))
         size_reduction = (1 - cleaned_size / original_size) * 100 if original_size > 0 else 0
         
         logger.info(f"🧹 [{data_source}] 数据清理完成: {len(raw_flights)} → {len(cleaned_flights)} 条")
