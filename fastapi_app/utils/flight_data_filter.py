@@ -567,7 +567,11 @@ class FlightDataFilter:
                 
                 # 对转换后的字典进行相应的清理
                 if data_source == 'google_flights':
-                    cleaned_flight = flight_dict
+                    # Google Flights数据也需要清理冗余字段
+                    cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
+                    # 确保source字段正确
+                    if cleaned_flight:
+                        cleaned_flight['source'] = self.source_mapping['google_flights']
                 elif data_source == 'kiwi':
                     cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
                 elif data_source == 'ai_recommended':
@@ -590,7 +594,11 @@ class FlightDataFilter:
                     
                     # 对转换后的字典进行相应的清理
                     if data_source == 'google_flights':
-                        cleaned_flight = flight_dict
+                        # Google Flights数据也需要清理冗余字段
+                        cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
+                        # 确保source字段正确
+                        if cleaned_flight:
+                            cleaned_flight['source'] = self.source_mapping['google_flights']
                     elif data_source == 'kiwi':
                         cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
                     elif data_source == 'ai_recommended':
