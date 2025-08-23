@@ -77,3 +77,12 @@ coverage.xml
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# AI助手配置目录 - 包含用户私人配置
+.claude/
+
+# 智能记忆目录
+.cunzhi-memory/
+
+# 测试数据备份目录 - 包含真实用户数据
+test_data_backup/

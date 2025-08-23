@@ -58,6 +58,10 @@ class AIFlightService:
         from ..utils.test_data_saver import get_test_data_saver
         self.test_data_saver = get_test_data_saver()
         
+        # 初始化数据过滤器
+        from ..utils.flight_data_filter import get_flight_data_filter
+        self.data_filter = get_flight_data_filter()
+        
         logger.info("AIFlightService初始化成功")
 
     async def search_flights_ai_enhanced(
@@ -1363,17 +1367,59 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                         }
                     }
 
-                # 对AI推荐数据进行最终的排序和数量限制
-                if ai_flights and len(ai_flights) > 100:
-                    # 按价格排序（升序）
-                    try:
-                        ai_flights_sorted = sorted(ai_flights, key=lambda x: getattr(x, 'price', float('inf')))
-                        ai_flights = ai_flights_sorted[:100]  # 取前100个最便宜的
-                        logger.info(f"🔧 [AI处理] AI推荐数据最终排序和限制: 从 {ai_count} 条减少到 {len(ai_flights)} 条（前100最便宜）")
-                    except Exception as e:
-                        logger.warning(f"⚠️ [AI处理] AI推荐数据排序失败: {e}")
-                        ai_flights = ai_flights[:100]  # 如果排序失败，至少限制数量
-                        logger.info(f"🔧 [AI处理] AI推荐数据数量限制: 从 {ai_count} 条减少到 {len(ai_flights)} 条")
+                # 🔧 使用数据过滤器清理冗余字段，保留核心信息
+                logger.info("🧹 [数据清理] 开始清理航班数据冗余字段")
+                
+                try:
+                    # 计算原始数据大小（用于对比）
+                    original_data_size = {
+                        'google_size': len(str(google_flights)),
+                        'kiwi_size': len(str(kiwi_flights)),
+                        'ai_size': len(str(ai_flights))
+                    }
+                    
+                    # 清理多源数据的冗余字段
+                    cleaned_data = self.data_filter.clean_multi_source_data(
+                        google_flights=google_flights,
+                        kiwi_flights=kiwi_flights,
+                        ai_flights=ai_flights
+                    )
+                    
+                    # 计算清理后数据大小
+                    cleaned_data_size = {
+                        'google_size': len(str(cleaned_data.get('google_flights', []))),
+                        'kiwi_size': len(str(cleaned_data.get('kiwi_flights', []))),
+                        'ai_size': len(str(cleaned_data.get('ai_flights', [])))
+                    }
+                    
+                    # 计算压缩效果
+                    total_original = sum(original_data_size.values())
+                    total_cleaned = sum(cleaned_data_size.values())
+                    compression_ratio = (1 - total_cleaned / total_original) * 100 if total_original > 0 else 0
+                    
+                    logger.info(f"📊 [数据清理] 冗余字段清理完成:")
+                    logger.info(f"  • 数据体积: {total_original:,} → {total_cleaned:,} 字符")
+                    logger.info(f"  • 压缩率: {compression_ratio:.1f}%")
+                    logger.info(f"  • Google: {original_data_size['google_size']:,} → {cleaned_data_size['google_size']:,}")
+                    logger.info(f"  • Kiwi: {original_data_size['kiwi_size']:,} → {cleaned_data_size['kiwi_size']:,}")
+                    logger.info(f"  • AI推荐: {original_data_size['ai_size']:,} → {cleaned_data_size['ai_size']:,}")
+                    
+                    # 使用清理后的数据进行AI处理
+                    google_flights = cleaned_data.get('google_flights', [])
+                    kiwi_flights = cleaned_data.get('kiwi_flights', [])
+                    ai_flights = cleaned_data.get('ai_flights', [])
+                    
+                except Exception as filter_error:
+                    logger.error(f"❌ [数据清理] 清理失败，使用原始数据: {filter_error}")
+                    # 降级处理：对AI推荐数据进行简单排序和数量限制
+                    if ai_flights and len(ai_flights) > 100:
+                        try:
+                            ai_flights_sorted = sorted(ai_flights, key=lambda x: getattr(x, 'price', float('inf')))
+                            ai_flights = ai_flights_sorted[:100]
+                            logger.info(f"🔧 [AI处理] AI推荐数据排序限制: {ai_count} → {len(ai_flights)} 条")
+                        except Exception as e:
+                            logger.warning(f"⚠️ [AI处理] AI推荐数据排序失败: {e}")
+                            ai_flights = ai_flights[:100]
 
                 # 统一使用单轮对话处理所有数据（已优化数据清理，可以处理大量数据）
                 final_total = len(google_flights) + len(kiwi_flights) + len(ai_flights)
