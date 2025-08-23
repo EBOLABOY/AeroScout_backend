@@ -684,18 +684,10 @@ class FlightDataFilter:
             
             # 处理不同类型的flight对象
             if hasattr(flight_data, 'model_dump'):
-                # 具有model_dump方法的对象（包括Pydantic模型和外部库模型）
                 flight_dict = flight_data.model_dump()
-                
-                # 更准确的类型描述
-                if 'fastapi_app.models' in str(type(flight_data)):
-                    logger.debug(f"🔄 [数据转换] 检测到本项目Pydantic模型，转换为字典: {type(flight_data)} → dict")
-                else:
-                    logger.debug(f"🔄 [数据转换] 检测到外部库模型对象，转换为字典: {type(flight_data)} → dict")
                 
                 # 对转换后的字典进行相应的清理
                 if data_source == 'google_flights':
-                    # Google Flights使用专门的清理方法
                     cleaned_flight = self.clean_google_flight_dict_data(flight_dict)
                 elif data_source == 'kiwi':
                     cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
@@ -705,9 +697,7 @@ class FlightDataFilter:
                         cleaned_flight['source'] = self.source_mapping['ai_recommended']
                         
             elif hasattr(flight_data, '__dict__') and not isinstance(flight_data, (str, dict, list, int, float)):
-                # 其他外部库对象（没有model_dump但有__dict__）
                 try:
-                    # 尝试转换为字典格式
                     if hasattr(flight_data, 'to_dict'):
                         flight_dict = flight_data.to_dict()
                     elif hasattr(flight_data, '__dict__'):
@@ -715,11 +705,8 @@ class FlightDataFilter:
                     else:
                         flight_dict = {}
                         
-                    logger.debug(f"🔄 [数据转换] 检测到传统外部对象，转换为字典: {type(flight_data)} → dict")
-                    
                     # 对转换后的字典进行相应的清理
                     if data_source == 'google_flights':
-                        # Google Flights使用专门的清理方法
                         cleaned_flight = self.clean_google_flight_dict_data(flight_dict)
                     elif data_source == 'kiwi':
                         cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
@@ -729,33 +716,26 @@ class FlightDataFilter:
                             cleaned_flight['source'] = self.source_mapping['ai_recommended']
                             
                 except Exception as e:
-                    logger.warning(f"⚠️ [{data_source}] 外部对象转换失败: {type(flight_data)} - {e}")
+                    logger.warning(f"[{data_source}] 对象转换失败: {e}")
                     
             elif data_source == 'google_flights':
                 if isinstance(flight_data, str):
-                    # Google Flights字符串格式数据
                     cleaned_flight = self.clean_google_flight_data(flight_data)
                 elif isinstance(flight_data, dict):
-                    # Google Flights已清理的字典格式数据，直接使用
                     cleaned_flight = flight_data
                     
             elif data_source == 'kiwi' and isinstance(flight_data, dict):
-                # Kiwi数据是字典格式
                 cleaned_flight = self.clean_kiwi_flight_data(flight_data)
                 
             elif data_source == 'ai_recommended':
                 if isinstance(flight_data, str):
-                    # *** 关键修复：AI推荐的字符串数据使用专属解析函数 ***
                     cleaned_flight = self.clean_ai_flight_data(flight_data)
                 elif isinstance(flight_data, dict):
-                    # AI推荐的字典格式数据（如果存在）
                     cleaned_flight = self.clean_kiwi_flight_data(flight_data)
-                    # 确保source字段正确
                     if cleaned_flight:
                         cleaned_flight['source'] = self.source_mapping['ai_recommended']
                 
             elif isinstance(flight_data, str):
-                # 其他字符串格式数据的降级处理
                 cleaned_flight = self.clean_google_flight_data(flight_data)
             
             if cleaned_flight:
@@ -763,7 +743,7 @@ class FlightDataFilter:
                 final_flight = self._remove_redundant_fields(cleaned_flight)
                 cleaned_flights.append(final_flight)
             else:
-                logger.warning(f"⚠️ [{data_source}] 无法处理的数据类型: {type(flight_data)}")
+                logger.warning(f"[{data_source}] 无法处理数据类型: {type(flight_data)}")
         
         # 更新统计信息
         self.statistics['filtered_count'] = len(cleaned_flights)
@@ -787,15 +767,14 @@ class FlightDataFilter:
                     serializable_data = data
                 return len(json.dumps(serializable_data, ensure_ascii=False, default=str))
             except Exception as e:
-                logger.warning(f"⚠️ [{data_source}] JSON序列化失败，跳过大小计算: {e}")
+                logger.warning(f"[{data_source}] JSON序列化失败，跳过大小计算: {e}")
                 return 0
         
         original_size = safe_json_size(raw_flights)
         cleaned_size = safe_json_size(cleaned_flights)
         size_reduction = (1 - cleaned_size / original_size) * 100 if original_size > 0 else 0
         
-        logger.info(f"🧹 [{data_source}] 数据清理完成: {len(raw_flights)} → {len(cleaned_flights)} 条")
-        logger.info(f"📊 [{data_source}] 体积压缩: {size_reduction:.1f}%")
+        logger.info(f"[{data_source}] 数据清理: {len(raw_flights)} → {len(cleaned_flights)} 条，压缩: {size_reduction:.1f}%")
         
         return cleaned_flights
     
@@ -835,7 +814,7 @@ class FlightDataFilter:
             total_original += len(ai_flights)
             total_cleaned += len(result['ai_flights'])
         
-        logger.info(f"📊 多源数据清理汇总: {total_original} → {total_cleaned} 条")
+        logger.info(f"多源数据清理汇总: {total_original} → {total_cleaned} 条")
         
         return result
 
@@ -871,7 +850,7 @@ class FlightDataFilter:
             search_params = search_params.copy()
             del search_params['user_preferences']
             cleaned_result['search_params'] = search_params
-            logger.info("🧹 删除重复的user_preferences字段")
+            logger.info("删除重复的user_preferences字段")
         
         # 清理航班数据
         combined_data = ai_input_data.get('combined_data', {})

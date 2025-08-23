@@ -34,7 +34,7 @@ try:
     from fli.models.google_flights.base import LocalizationConfig, Language, Currency
 
     SMART_FLIGHTS_AVAILABLE = True
-    logger.info("✅ smart-flights服务可用")
+    logger.info("smart-flights服务可用")
 except ImportError as e:
     SMART_FLIGHTS_AVAILABLE = False
     logger.warning(f"smart-flights库不可用: {e}")
@@ -86,7 +86,7 @@ class AIFlightService:
         3. 返回Markdown报告
         """
         try:
-            logger.info(f"🚀 开始AI增强航班搜索: {departure_code} → {destination_code}, {depart_date}")
+            logger.info(f"开始AI增强搜索: {departure_code} → {destination_code}")
 
             # 准备搜索参数（用于测试数据保存）
             search_params = {
@@ -110,8 +110,7 @@ class AIFlightService:
             is_roundtrip = return_date is not None
 
             if is_roundtrip:
-                # 往返航班：只执行前两个阶段（Google Flights + Kiwi）
-                logger.info("🚀 开始并行执行两阶段搜索（往返航班）")
+                logger.info("执行两阶段搜索（往返航班）")
 
                 tasks = [
                     # 阶段1: 获取Google Flights原始数据
@@ -128,14 +127,11 @@ class AIFlightService:
 
                 # 并行执行两个搜索任务
                 google_flights_raw, kiwi_flights_raw = await asyncio.gather(*tasks)
-                ai_flights_raw = []  # 往返航班不使用AI推荐隐藏城市
+                ai_flights_raw = []
 
-                # 测试数据保存功能已移除
-
-                logger.info(f"两阶段原始数据收集完成: Google({len(google_flights_raw)}), Kiwi({len(kiwi_flights_raw)})")
+                logger.info(f"数据收集完成: Google({len(google_flights_raw)}), Kiwi({len(kiwi_flights_raw)})")
             else:
-                # 单程航班：执行完整的三阶段搜索
-                logger.info("🚀 开始并行执行三阶段搜索（单程航班）")
+                logger.info("执行三阶段搜索（单程航班）")
 
                 tasks = [
                     # 阶段1: 获取Google Flights原始数据
@@ -157,12 +153,8 @@ class AIFlightService:
                 # 并行执行所有搜索任务
                 google_flights_raw, kiwi_flights_raw, ai_flights_raw = await asyncio.gather(*tasks)
 
-                # 测试数据保存功能已移除
-
             # 交给AI处理
-            logger.info("🤖 将原始数据交给AI处理")
-            
-            # 测试数据保存功能已移除
+            logger.info("开始AI处理")
             
             ai_processed_result = await self._process_flights_with_ai(
                 google_flights=google_flights_raw,
@@ -175,9 +167,7 @@ class AIFlightService:
             )
 
             if ai_processed_result['success']:
-                logger.info("✅ AI处理成功，生成详细分析报告")
-                
-                # 测试数据保存功能已移除
+                logger.info("AI处理成功")
                 
                 return {
                     'success': True,
@@ -238,8 +228,6 @@ class AIFlightService:
     ) -> list:
         """获取Google Flights原始数据"""
         try:
-            logger.info(f"获取常规搜索原始数据: {departure_code} → {destination_code}")
-
             if not SMART_FLIGHTS_AVAILABLE:
                 logger.warning("smart-flights库不可用")
                 return []
@@ -256,10 +244,6 @@ class AIFlightService:
 
             # 过滤掉价格为0的航班数据
             filtered_results = self._filter_valid_price_flights(results, source="常规搜索")
-
-            logger.info(f"获取常规搜索原始数据完成: {len(results)} 条记录")
-            if len(filtered_results) < len(results):
-                logger.info(f"🔧 过滤掉价格为0的航班: {len(results) - len(filtered_results)} 条，剩余: {len(filtered_results)} 条")
 
             return filtered_results
 
@@ -337,9 +321,6 @@ class AIFlightService:
     ) -> list:
         """获取Kiwi航班原始数据（包含隐藏城市和常规航班）"""
         try:
-            trip_type = "往返" if return_date else "单程"
-            logger.info(f"🔍 [隐藏城市数据获取] 开始: {departure_code} → {destination_code} ({trip_type}, {seat_class})")
-
             if not SMART_FLIGHTS_AVAILABLE:
                 logger.warning("smart-flights库不可用")
                 return []
