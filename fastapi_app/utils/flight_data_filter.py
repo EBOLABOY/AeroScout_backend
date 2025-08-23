@@ -554,7 +554,23 @@ class FlightDataFilter:
         for flight_data in raw_flights:
             cleaned_flight = None
             
-            if data_source == 'google_flights':
+            # 首先检查是否为Pydantic模型（FlightResult等）
+            if hasattr(flight_data, 'model_dump'):
+                # 转换为字典格式进行处理
+                flight_dict = flight_data.model_dump()
+                logger.debug(f"🔄 [数据转换] 检测到Pydantic模型，转换为字典: {type(flight_data)} → dict")
+                
+                # 对转换后的字典进行相应的清理
+                if data_source == 'google_flights':
+                    cleaned_flight = flight_dict  # Google Flights字典格式，直接使用
+                elif data_source == 'kiwi':
+                    cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
+                elif data_source == 'ai_recommended':
+                    cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
+                    if cleaned_flight:
+                        cleaned_flight['source'] = self.source_mapping['ai_recommended']
+                        
+            elif data_source == 'google_flights':
                 if isinstance(flight_data, str):
                     # Google Flights字符串格式数据
                     cleaned_flight = self.clean_google_flight_data(flight_data)
@@ -585,6 +601,8 @@ class FlightDataFilter:
                 # 清理冗余字段
                 final_flight = self._remove_redundant_fields(cleaned_flight)
                 cleaned_flights.append(final_flight)
+            else:
+                logger.warning(f"⚠️ [{data_source}] 无法处理的数据类型: {type(flight_data)}")
         
         # 更新统计信息
         self.statistics['filtered_count'] = len(cleaned_flights)
