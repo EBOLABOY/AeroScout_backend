@@ -595,8 +595,24 @@ class FlightDataFilter:
         
         # 计算数据压缩效果（使用JSON字符串长度）
         import json
-        original_size = len(json.dumps(raw_flights, ensure_ascii=False)) if raw_flights else 0
-        cleaned_size = len(json.dumps(cleaned_flights, ensure_ascii=False))
+        
+        def safe_json_size(data):
+            """安全计算数据的JSON序列化大小"""
+            if not data:
+                return 0
+            try:
+                # 如果是Pydantic模型列表，转换为字典
+                if isinstance(data, list) and data and hasattr(data[0], 'model_dump'):
+                    serializable_data = [item.model_dump() if hasattr(item, 'model_dump') else item for item in data]
+                else:
+                    serializable_data = data
+                return len(json.dumps(serializable_data, ensure_ascii=False, default=str))
+            except Exception as e:
+                logger.warning(f"⚠️ [{data_source}] JSON序列化失败，跳过大小计算: {e}")
+                return 0
+        
+        original_size = safe_json_size(raw_flights)
+        cleaned_size = safe_json_size(cleaned_flights)
         size_reduction = (1 - cleaned_size / original_size) * 100 if original_size > 0 else 0
         
         logger.info(f"🧹 [{data_source}] 数据清理完成: {len(raw_flights)} → {len(cleaned_flights)} 条")

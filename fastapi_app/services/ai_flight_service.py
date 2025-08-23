@@ -1344,6 +1344,18 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 try:
                     import json
                     
+                    # 添加调试信息：检查输入数据类型
+                    logger.info(f"🔍 [数据清理调试] google_flights类型: {type(google_flights)}, 长度: {len(google_flights) if google_flights else 0}")
+                    logger.info(f"🔍 [数据清理调试] kiwi_flights类型: {type(kiwi_flights)}, 长度: {len(kiwi_flights) if kiwi_flights else 0}")
+                    logger.info(f"🔍 [数据清理调试] ai_flights类型: {type(ai_flights)}, 长度: {len(ai_flights) if ai_flights else 0}")
+                    
+                    if google_flights and len(google_flights) > 0:
+                        logger.info(f"🔍 [数据清理调试] google_flights[0]类型: {type(google_flights[0])}")
+                    if kiwi_flights and len(kiwi_flights) > 0:
+                        logger.info(f"🔍 [数据清理调试] kiwi_flights[0]类型: {type(kiwi_flights[0])}")
+                    if ai_flights and len(ai_flights) > 0:
+                        logger.info(f"🔍 [数据清理调试] ai_flights[0]类型: {type(ai_flights[0])}")
+                    
                     # 计算原始数据大小（用JSON字符串长度）
                     def safe_json_size(data):
                         """安全计算数据的JSON序列化大小"""
