@@ -556,9 +556,14 @@ class FlightDataFilter:
             
             # 处理不同类型的flight对象
             if hasattr(flight_data, 'model_dump'):
-                # Pydantic模型（本项目的FlightResult）
+                # 具有model_dump方法的对象（包括Pydantic模型和外部库模型）
                 flight_dict = flight_data.model_dump()
-                logger.debug(f"🔄 [数据转换] 检测到Pydantic模型，转换为字典: {type(flight_data)} → dict")
+                
+                # 更准确的类型描述
+                if 'fastapi_app.models' in str(type(flight_data)):
+                    logger.debug(f"🔄 [数据转换] 检测到本项目Pydantic模型，转换为字典: {type(flight_data)} → dict")
+                else:
+                    logger.debug(f"🔄 [数据转换] 检测到外部库模型对象，转换为字典: {type(flight_data)} → dict")
                 
                 # 对转换后的字典进行相应的清理
                 if data_source == 'google_flights':
@@ -571,7 +576,7 @@ class FlightDataFilter:
                         cleaned_flight['source'] = self.source_mapping['ai_recommended']
                         
             elif hasattr(flight_data, '__dict__') and not isinstance(flight_data, (str, dict, list, int, float)):
-                # 外部库对象（如fli.models.google_flights.base.FlightResult）
+                # 其他外部库对象（没有model_dump但有__dict__）
                 try:
                     # 尝试转换为字典格式
                     if hasattr(flight_data, 'to_dict'):
@@ -581,7 +586,7 @@ class FlightDataFilter:
                     else:
                         flight_dict = {}
                         
-                    logger.debug(f"🔄 [数据转换] 检测到外部对象，转换为字典: {type(flight_data)} → dict")
+                    logger.debug(f"🔄 [数据转换] 检测到传统外部对象，转换为字典: {type(flight_data)} → dict")
                     
                     # 对转换后的字典进行相应的清理
                     if data_source == 'google_flights':
