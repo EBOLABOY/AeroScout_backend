@@ -54,9 +54,7 @@ class AIFlightService:
             'cache_misses': 0
         }
         
-        # 初始化测试数据保存器
-        from ..utils.test_data_saver import get_test_data_saver
-        self.test_data_saver = get_test_data_saver()
+        # 测试数据保存功能已移除
         
         # 初始化数据过滤器
         from ..utils.flight_data_filter import get_flight_data_filter
@@ -132,15 +130,7 @@ class AIFlightService:
                 google_flights_raw, kiwi_flights_raw = await asyncio.gather(*tasks)
                 ai_flights_raw = []  # 往返航班不使用AI推荐隐藏城市
 
-                # 🧪 保存各阶段原始数据（测试模式）
-                self.test_data_saver.save_stage_data(
-                    "google_flights", google_flights_raw, search_params,
-                    {"stage": "1", "description": "Google Flights搜索结果", "is_roundtrip": True}
-                )
-                self.test_data_saver.save_stage_data(
-                    "kiwi_flights", kiwi_flights_raw, search_params,
-                    {"stage": "2", "description": "Kiwi航班搜索结果", "is_roundtrip": True}
-                )
+                # 测试数据保存功能已移除
 
                 logger.info(f"两阶段原始数据收集完成: Google({len(google_flights_raw)}), Kiwi({len(kiwi_flights_raw)})")
             else:
@@ -167,28 +157,12 @@ class AIFlightService:
                 # 并行执行所有搜索任务
                 google_flights_raw, kiwi_flights_raw, ai_flights_raw = await asyncio.gather(*tasks)
 
-                # 🧪 保存各阶段原始数据（测试模式）
-                self.test_data_saver.save_stage_data(
-                    "google_flights", google_flights_raw, search_params,
-                    {"stage": "1", "description": "Google Flights搜索结果", "is_roundtrip": False}
-                )
-                self.test_data_saver.save_stage_data(
-                    "kiwi_flights", kiwi_flights_raw, search_params,
-                    {"stage": "2", "description": "Kiwi航班搜索结果", "is_roundtrip": False}
-                )
-                self.test_data_saver.save_stage_data(
-                    "ai_recommended", ai_flights_raw, search_params,
-                    {"stage": "3", "description": "AI推荐隐藏城市搜索结果", "is_roundtrip": False}
-                )
+                # 测试数据保存功能已移除
 
             # 交给AI处理
             logger.info("🤖 将原始数据交给AI处理")
             
-            # 🧪 保存发送给AI的整合数据（测试模式）
-            self.test_data_saver.save_ai_input_data(
-                google_flights_raw, kiwi_flights_raw, ai_flights_raw,
-                search_params, user_preferences
-            )
+            # 测试数据保存功能已移除
             
             ai_processed_result = await self._process_flights_with_ai(
                 google_flights=google_flights_raw,
@@ -203,11 +177,7 @@ class AIFlightService:
             if ai_processed_result['success']:
                 logger.info("✅ AI处理成功，生成详细分析报告")
                 
-                # 🧪 保存AI输出数据（测试模式）
-                self.test_data_saver.save_ai_output_data(
-                    ai_processed_result, search_params,
-                    {"processing_method": "ai_enhanced", "stage_count": 3 if not is_roundtrip else 2}
-                )
+                # 测试数据保存功能已移除
                 
                 return {
                     'success': True,
@@ -1429,16 +1399,13 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                     language, departure_code, destination_code, user_preferences
                 )
 
-                # 详细记录processed_data的内容
+                # 记录processed_data的基本信息
                 logger.info(f"🔍 [AI处理结果] processed_data类型: {type(processed_data)}")
                 if processed_data:
                     logger.info(f"🔍 [AI处理结果] processed_data键: {list(processed_data.keys()) if isinstance(processed_data, dict) else 'Not a dict'}")
                     ai_report = processed_data.get('ai_analysis_report', '')
                     logger.info(f"🔍 [AI处理结果] ai_analysis_report长度: {len(ai_report)}")
-                    if ai_report:
-                        preview = ai_report[:200].replace('\n', '\\n')
-                        logger.info(f"🔍 [AI处理结果] ai_analysis_report预览: {preview}")
-                    else:
+                    if not ai_report:
                         logger.warning("⚠️ [AI处理结果] ai_analysis_report为空！")
                 else:
                     logger.error("❌ [AI处理结果] processed_data为None或False！")
@@ -1749,16 +1716,9 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                     ai_content = result.get('content', '')
 
                     logger.info(f"✅ AI处理成功，使用模型: {model_name}")
-
-                    # 详细记录AI返回的内容
                     logger.info(f"📝 AI返回内容长度: {len(ai_content)} 字符")
+                    
                     if ai_content:
-                        # 记录前500个字符用于调试
-                        preview = ai_content[:500].replace('\n', '\\n')
-                        logger.info(f"📝 AI返回内容预览: {preview}")
-                        if len(ai_content) > 500:
-                            logger.info(f"📝 AI返回内容还有 {len(ai_content) - 500} 个字符...")
-
                         # 检查内容是否为空，如果为空则抛出异常触发重试
                         if not ai_content.strip():
                             logger.warning("⚠️ AI返回内容为空，触发重试")
@@ -1992,18 +1952,13 @@ You must strictly follow this key principle: The most successful Skiplagging opp
 
                         # 详细记录AI原始响应
                         logger.info(f"🔍 AI原始响应长度: {len(content)} 字符")
-                        if content:
-                            preview = content[:200].replace('\n', '\\n')
-                            logger.info(f"🔍 AI原始响应预览: {preview}")
-                        else:
-                            logger.warning("⚠️ AI原始响应为空！")
+                        # 原始响应预览移至上层方法避免重复
 
                         # 检查strip后的长度
                         stripped_content = content.strip()
                         logger.info(f"🔍 AI响应strip后长度: {len(stripped_content)} 字符")
                         if len(content) != len(stripped_content):
                             logger.warning(f"⚠️ strip()删除了 {len(content) - len(stripped_content)} 个字符！")
-                            logger.info(f"🔍 被删除的字符: {repr(content[:50])}")
 
                         # 处理纯Markdown响应
                         try:
