@@ -49,20 +49,24 @@ def setup_logging(
     
     # 添加文件日志处理器（如果启用）
     if enable_file_logging:
-        # 确保日志目录存在
-        os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
-        
-        logger.add(
-            log_file_path,
-            format=format_string,
-            level=level,
-            rotation="10 MB",  # 文件大小轮转
-            retention="7 days",  # 保留7天
-            compression="zip",  # 压缩旧日志
-            encoding="utf-8"
-        )
-        
-        logger.info(f"文件日志已启用: {log_file_path}")
+        try:
+            # 确保日志目录存在
+            os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
+            
+            logger.add(
+                log_file_path,
+                format=format_string,
+                level=level,
+                rotation="10 MB",
+                retention="7 days",
+                compression="zip",
+                encoding="utf-8"
+            )
+            
+            logger.info(f"文件日志已启用: {log_file_path}")
+        except (PermissionError, OSError) as e:
+            logger.warning(f"文件日志创建失败，使用控制台日志: {e}")
+            # 继续运行，仅使用控制台日志
     
     logger.info(f"日志系统初始化完成，级别: {level}")
 

@@ -21,8 +21,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制应用代码
 COPY . .
 
-# 创建非 root 用户
+# 复制并设置init脚本权限
+COPY init-logs.sh /init-logs.sh
+RUN chmod +x /init-logs.sh
+
+# 创建非root用户和必要目录
 RUN useradd --create-home --shell /bin/bash app \
+    && mkdir -p /app/logs \
     && chown -R app:app /app
 USER app
 

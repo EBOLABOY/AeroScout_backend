@@ -115,9 +115,6 @@ def create_fastapi_app() -> FastAPI:
     """创建FastAPI应用"""
     
     # 创建FastAPI实例
-    # 从环境变量读取DEBUG模式，增加安全性
-    is_debug_mode = os.getenv("DEBUG", "False").lower() in ("true", "1", "t")
-
     app = FastAPI(
         title="Ticketradar API",
         description="机票监控和AI旅行规划系统",
@@ -125,7 +122,7 @@ def create_fastapi_app() -> FastAPI:
         docs_url="/docs",
         redoc_url="/redoc",
         lifespan=lifespan,
-        debug=is_debug_mode
+        debug=settings.DEBUG
     )
     
     # 配置CORS（支持SSE）
@@ -162,10 +159,10 @@ def create_fastapi_app() -> FastAPI:
     @app.get("/")
     async def root():
         return {
-            "message": "Ticketradar FastAPI服务 - 调试模式",
+            "message": f"Ticketradar FastAPI服务 - {'调试' if settings.DEBUG else '生产'}模式",
             "version": "2.0.0",
             "docs": "/docs",
-            "debug": True
+            "debug": settings.DEBUG
         }
     
     # 健康检查
@@ -198,8 +195,8 @@ if __name__ == "__main__":
         "main_fastapi:app",
         host=host,
         port=port,
-        reload=True,  # 开启自动重载，代码更改后自动重启
-        log_level="debug",  # 开启调试日志
-        reload_dirs=["./fastapi_app", "./app"],  # 监控的目录
-        reload_excludes=["*.pyc", "__pycache__", "*.log", "*.db"]  # 排除的文件
+        reload=settings.DEBUG,  # 仅调试模式启用自动重载
+        log_level="debug" if settings.DEBUG else "info",  # 根据DEBUG设置日志级别
+        reload_dirs=["./fastapi_app", "./app"] if settings.DEBUG else None,  # 仅调试模式监控目录
+        reload_excludes=["*.pyc", "__pycache__", "*.log", "*.db"] if settings.DEBUG else None
     )
