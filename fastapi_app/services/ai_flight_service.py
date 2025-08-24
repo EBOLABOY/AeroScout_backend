@@ -1988,7 +1988,9 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 logger.warning(f"⚠️ 请求数据量较大: {payload_size:,} 字节，可能导致403错误")
                 logger.warning("💡 建议：考虑实现数据分批处理或减少数据量")
 
-            async with aiohttp.ClientSession() as session:
+            # 修复Windows DNS解析器问题
+            connector = aiohttp.TCPConnector(force_close=True, use_dns_cache=False)
+            async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.post(
                     f"{ai_api_url}/chat/completions",
                     headers=headers,
@@ -1997,6 +1999,22 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 ) as response:
                     if response.status == 200:
                         result = await response.json()
+                        
+                        # 调试：记录完整的AI响应结构
+                        logger.debug(f"🔍 [调试] AI完整响应: {result}")
+                        logger.debug(f"🔍 [调试] 响应键: {list(result.keys())}")
+                        
+                        # 检查choices字段
+                        if 'choices' not in result:
+                            logger.error("❌ [调试] AI响应中没有'choices'字段")
+                            return {'success': False, 'error': 'AI响应格式错误：缺少choices字段', 'content': None}
+                        
+                        if not result['choices']:
+                            logger.error("❌ [调试] AI响应choices字段为空")
+                            return {'success': False, 'error': 'AI响应格式错误：choices为空', 'content': None}
+                        
+                        logger.debug(f"🔍 [调试] choices[0]: {result['choices'][0]}")
+                        
                         content = result['choices'][0]['message']['content']
 
                         # 详细记录AI原始响应
@@ -2044,9 +2062,10 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                         # 读取错误响应内容
                         try:
                             error_content = await response.text()
-                            logger.debug(f"错误响应内容: {error_content}")
+                            logger.error(f"AI API错误响应内容: {error_content}")
                         except:
                             error_content = "无法读取错误内容"
+                            logger.error("无法读取AI API错误响应内容")
 
                         return {
                             'success': False,

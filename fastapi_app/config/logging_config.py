@@ -113,6 +113,19 @@ def setup_production_logging():
         enable_file_logging=True,
         log_file_path="logs/production.log"
     )
+    
+    # 为AI服务单独设置更详细的日志处理器
+    # 确保AI相关错误总是被记录到单独文件
+    logger.add(
+        "logs/ai_service.log",
+        format=LOG_FORMATS["detailed"],
+        level="INFO",
+        rotation="10 MB",
+        retention="7 days",
+        compression="zip",
+        encoding="utf-8",
+        filter=lambda record: "ai" in record["name"].lower() or "ai_" in record["message"].lower()
+    )
 
 
 def setup_development_logging():

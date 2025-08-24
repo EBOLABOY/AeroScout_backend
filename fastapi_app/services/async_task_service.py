@@ -6,7 +6,7 @@ import uuid
 import json
 import asyncio
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 from enum import Enum
 from loguru import logger
 
@@ -19,6 +19,69 @@ class TaskStatus(str, Enum):
     PROCESSING = "PROCESSING"  # 正在处理
     COMPLETED = "COMPLETED"   # 已完成
     FAILED = "FAILED"        # 失败
+
+
+class ProcessingStage(str, Enum):
+    """处理阶段枚举"""
+    INITIALIZATION = "initialization"    # 初始化阶段 (0-25%)
+    SEARCHING = "searching"             # 搜索阶段 (25-50%)
+    AI_ANALYSIS = "ai_analysis"         # AI分析阶段 (50-75%)
+    FINALIZING = "finalizing"           # 生成推荐阶段 (75-100%)
+
+
+class StageInfo:
+    """阶段信息类"""
+    STAGES = {
+        ProcessingStage.INITIALIZATION: {
+            "id": 0,
+            "title": "连接数据库",
+            "description": "连接到航班数据系统...",
+            "icon": "search",  # 前端期望的图标
+            "min_progress": 0,
+            "max_progress": 25
+        },
+        ProcessingStage.SEARCHING: {
+            "id": 1,
+            "title": "搜索航班",
+            "description": "在各大航空公司中查找最优选择...",
+            "icon": "flight",  # 前端期望的图标
+            "min_progress": 25,
+            "max_progress": 50
+        },
+        ProcessingStage.AI_ANALYSIS: {
+            "id": 2,
+            "title": "分析数据",
+            "description": "AI智能分析价格和时间...",
+            "icon": "analytics",  # 前端期望的图标
+            "min_progress": 50,
+            "max_progress": 75
+        },
+        ProcessingStage.FINALIZING: {
+            "id": 3,
+            "title": "生成推荐",
+            "description": "为您个性化定制最佳方案...",
+            "icon": "check",  # 前端期望的图标
+            "min_progress": 75,
+            "max_progress": 100
+        }
+    }
+    
+    @classmethod
+    def get_stage_info(cls, stage: ProcessingStage) -> Dict[str, Any]:
+        """获取阶段信息"""
+        return cls.STAGES.get(stage, {})
+    
+    @classmethod
+    def get_stage_by_progress(cls, progress: float) -> ProcessingStage:
+        """根据进度获取当前阶段"""
+        if progress < 25:
+            return ProcessingStage.INITIALIZATION
+        elif progress < 50:
+            return ProcessingStage.SEARCHING
+        elif progress < 75:
+            return ProcessingStage.AI_ANALYSIS
+        else:
+            return ProcessingStage.FINALIZING
 
 
 class AsyncTaskService:
@@ -74,7 +137,9 @@ class AsyncTaskService:
             "search_params": search_params,
             "progress": 0,
             "message": "任务已创建，等待处理...",
-            "estimated_duration": 120  # 预估2分钟
+            "estimated_duration": 120,  # 预估2分钟
+            "stage": ProcessingStage.INITIALIZATION.value,  # 添加阶段信息
+            "stage_info": StageInfo.get_stage_info(ProcessingStage.INITIALIZATION)
         }
         
         # 存储任务信息
@@ -100,7 +165,8 @@ class AsyncTaskService:
         status: TaskStatus,
         progress: Optional[float] = None,
         message: Optional[str] = None,
-        error: Optional[str] = None
+        error: Optional[str] = None,
+        stage: Optional[ProcessingStage] = None
     ) -> bool:
         """
         更新任务状态
@@ -111,6 +177,7 @@ class AsyncTaskService:
             progress: 进度 (0.0-1.0)
             message: 状态消息
             error: 错误信息
+            stage: 处理阶段
         """
         try:
             # 获取当前任务信息
@@ -129,12 +196,20 @@ class AsyncTaskService:
             
             if progress is not None:
                 task_info["progress"] = progress
+                # 如果进度更新了，自动更新阶段
+                if stage is None:
+                    stage = StageInfo.get_stage_by_progress(progress)
             
             if message is not None:
                 task_info["message"] = message
             
             if error is not None:
                 task_info["error"] = error
+            
+            # 更新阶段信息
+            if stage is not None:
+                task_info["stage"] = stage.value
+                task_info["stage_info"] = StageInfo.get_stage_info(stage)
             
             # 保存更新后的信息
             await self.cache_service.set(
@@ -150,7 +225,7 @@ class AsyncTaskService:
                 expire=self.default_ttl
             )
             
-            logger.info(f"任务状态更新: {task_id} -> {status}")
+            logger.info(f"任务状态更新: {task_id} -> {status} (进度: {progress}%, 阶段: {stage.value if stage else 'auto'})")
             return True
             
         except Exception as e:

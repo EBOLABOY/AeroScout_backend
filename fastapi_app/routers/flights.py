@@ -20,7 +20,7 @@ from fastapi_app.models.flights import (
 from fastapi_app.dependencies.auth import get_current_active_user, get_current_user_optional
 from fastapi_app.services.ai_flight_service import AIFlightService
 from fastapi_app.services.flight_service import get_flight_service
-from fastapi_app.services.async_task_service import async_task_service, TaskStatus
+from fastapi_app.services.async_task_service import async_task_service, TaskStatus, ProcessingStage, StageInfo
 
 # 创建路由器
 router = APIRouter()
@@ -934,18 +934,7 @@ def _estimate_search_time(search_params: Dict[str, Any]) -> int:
     return max(30, min(base_time, 180))  # 30秒-3分钟之间
 
 
-def _get_progress_stage(progress: float) -> str:
-    """根据进度返回当前阶段"""
-    if progress < 0.1:
-        return "initialization"
-    elif progress < 0.6:
-        return "searching"
-    elif progress < 0.9:
-        return "ai_analysis"
-    elif progress < 1.0:
-        return "finalizing"
-    else:
-        return "completed"
+# 已移除旧的进度阶段函数，现在使用 StageInfo.get_stage_by_progress()
 
 
 def _calculate_remaining_time(progress: float, estimated_total: int) -> int:
@@ -970,12 +959,13 @@ async def _execute_ai_search_background(task_id: str, search_params: Dict[str, A
     try:
         logger.info(f"开始执行后台AI搜索任务: {task_id}")
 
-        # 阶段1: 初始化 (0-10%)
+        # 阶段0: 连接数据库 (0-25%)
         await async_task_service.update_task_status(
             task_id,
             TaskStatus.PROCESSING,
             progress=0.05,
-            message="正在初始化搜索引擎..."
+            message="正在连接数据库...",
+            stage=ProcessingStage.INITIALIZATION
         )
         
         await asyncio.sleep(0.5)  # 让前端看到进度变化
@@ -983,27 +973,39 @@ async def _execute_ai_search_background(task_id: str, search_params: Dict[str, A
         await async_task_service.update_task_status(
             task_id,
             TaskStatus.PROCESSING,
-            progress=0.1,
-            message="正在连接航空公司数据库..."
+            progress=0.10,
+            message="正在初始化搜索引擎...",
+            stage=ProcessingStage.INITIALIZATION
+        )
+        
+        await asyncio.sleep(0.5)
+        
+        await async_task_service.update_task_status(
+            task_id,
+            TaskStatus.PROCESSING,
+            progress=0.20,
+            message="正在准备搜索参数...",
+            stage=ProcessingStage.INITIALIZATION
         )
 
         # 创建AI搜索服务实例
         flight_service = AIFlightService()
 
-        # 阶段2: 数据收集 (10-60%)
+        # 阶段1: 搜索航班 (25-50%)
         await async_task_service.update_task_status(
             task_id,
             TaskStatus.PROCESSING,
-            progress=0.15,
-            message="正在搜索基础航班数据..."
+            progress=0.25,
+            message="正在搜索航班...",
+            stage=ProcessingStage.SEARCHING
         )
         
         # 模拟搜索过程中的进度更新
         search_stages = [
-            (0.25, "正在查询主要航空公司..."),
+            (0.30, "正在查询主要航空公司..."),
             (0.35, "正在查询廉价航空公司..."),
-            (0.45, "正在搜索隐藏城市机会..."),
-            (0.55, "正在收集价格信息...")
+            (0.40, "正在搜索隐藏城市机会..."),
+            (0.45, "正在收集价格信息...")
         ]
         
         for progress, message in search_stages:
@@ -1011,16 +1013,28 @@ async def _execute_ai_search_background(task_id: str, search_params: Dict[str, A
                 task_id,
                 TaskStatus.PROCESSING,
                 progress=progress,
-                message=message
+                message=message,
+                stage=ProcessingStage.SEARCHING
             )
             await asyncio.sleep(0.3)  # 短暂延迟显示进度
 
-        # 阶段3: AI分析 (60-90%)
+        # 阶段2: 分析数据 (50-75%)
         await async_task_service.update_task_status(
             task_id,
             TaskStatus.PROCESSING,
-            progress=0.60,
-            message="正在进行AI数据分析..."
+            progress=0.55,
+            message="正在分析数据...",
+            stage=ProcessingStage.AI_ANALYSIS
+        )
+        
+        await asyncio.sleep(0.5)
+        
+        await async_task_service.update_task_status(
+            task_id,
+            TaskStatus.PROCESSING,
+            progress=0.65,
+            message="AI智能分析价格和时间...",
+            stage=ProcessingStage.AI_ANALYSIS
         )
 
         # 执行AI增强搜索
@@ -1042,12 +1056,23 @@ async def _execute_ai_search_background(task_id: str, search_params: Dict[str, A
             is_guest_user=search_params.get("is_guest_user", False)
         )
 
-        # 阶段4: 结果处理 (90-100%)
+        # 阶段3: 生成推荐 (75-100%)
         await async_task_service.update_task_status(
             task_id,
             TaskStatus.PROCESSING,
-            progress=0.85,
-            message="正在生成个性化推荐..."
+            progress=0.80,
+            message="正在生成推荐...",
+            stage=ProcessingStage.FINALIZING
+        )
+        
+        await asyncio.sleep(0.3)
+        
+        await async_task_service.update_task_status(
+            task_id,
+            TaskStatus.PROCESSING,
+            progress=0.90,
+            message="为您个性化定制最佳方案...",
+            stage=ProcessingStage.FINALIZING
         )
         
         await asyncio.sleep(0.2)
@@ -1056,7 +1081,8 @@ async def _execute_ai_search_background(task_id: str, search_params: Dict[str, A
             task_id,
             TaskStatus.PROCESSING,
             progress=0.95,
-            message="正在最终确认结果..."
+            message="正在最终确认结果...",
+            stage=ProcessingStage.FINALIZING
         )
 
         # 保存搜索结果
@@ -1067,7 +1093,8 @@ async def _execute_ai_search_background(task_id: str, search_params: Dict[str, A
             task_id,
             TaskStatus.COMPLETED,
             progress=1.0,
-            message="搜索完成"
+            message="搜索完成",
+            stage=ProcessingStage.FINALIZING
         )
 
         logger.info(f"后台AI搜索任务完成: {task_id}, 找到 {len(result.get('flights', []))} 个航班")
@@ -1137,6 +1164,22 @@ async def stream_task_status(
             # 发送初始状态
             initial_status = task_info.get("status", "PENDING")
             initial_progress = task_info.get("progress", 0)
+            # 默认预估时间60秒
+            default_estimated_duration = 60
+            
+            # 获取初始阶段信息
+            initial_stage = task_info.get("stage", ProcessingStage.INITIALIZATION.value)
+            try:
+                # 尝试将字符串转换为ProcessingStage枚举
+                if isinstance(initial_stage, str):
+                    stage_enum = ProcessingStage(initial_stage)
+                else:
+                    stage_enum = ProcessingStage.INITIALIZATION
+            except ValueError:
+                stage_enum = ProcessingStage.INITIALIZATION
+                
+            stage_info = StageInfo.get_stage_info(stage_enum)
+            
             initial_data = {
                 "status": initial_status,
                 "progress": initial_progress,
@@ -1144,8 +1187,14 @@ async def stream_task_status(
                 "task_id": task_id,
                 "created_at": task_info.get("created_at"),
                 "updated_at": task_info.get("updated_at"),
-                "estimated_duration": task_info.get("estimated_duration", _estimate_search_time({})),
-                "reconnected": True if "last_event_id" in locals() else False  # 标记是否为重连
+                "estimated_duration": task_info.get("estimated_duration", default_estimated_duration),
+                "reconnected": True if "last_event_id" in locals() else False,  # 标记是否为重连
+                "stage": {
+                    "id": stage_info.get("id", 0),  # 修复：确保初始阶段ID正确传递
+                    "title": stage_info.get("title", "正在初始化"),
+                    "description": stage_info.get("description", "准备中..."),
+                    "icon": stage_info.get("icon", "search")
+                }
             }
 
             logger.info(f"📤 SSE发送初始状态: {task_id} -> {initial_status} ({initial_progress}%)")
@@ -1242,6 +1291,10 @@ async def stream_task_status(
                     )
 
                     if status_changed:
+                        # 获取当前阶段信息
+                        current_stage = StageInfo.get_stage_by_progress(current_progress)
+                        stage_info = StageInfo.get_stage_info(current_stage)
+                        
                         # 发送状态更新
                         update_data = {
                             "status": current_status,
@@ -1249,7 +1302,12 @@ async def stream_task_status(
                             "message": current_message,
                             "task_id": task_id,
                             "updated_at": current_updated,
-                            "stage": _get_progress_stage(current_progress),  # 添加阶段信息
+                            "stage": {
+                                "id": stage_info.get("id", 0),  # 修复：确保阶段ID正确传递
+                                "title": stage_info.get("title", "正在处理"),
+                                "description": stage_info.get("description", "处理中..."),
+                                "icon": stage_info.get("icon", "search")
+                            },
                             "estimated_remaining": _calculate_remaining_time(current_progress, task_info.get("estimated_duration", 60))
                         }
 
