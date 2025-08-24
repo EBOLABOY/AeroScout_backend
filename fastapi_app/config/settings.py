@@ -67,29 +67,9 @@ CORS_ORIGINS = [
 ]
 
 # 受信任主机
-if DEBUG:
-    TRUSTED_HOSTS = ["*"]  # 开发模式允许所有主机
-else:
-    # 生产模式基础主机列表
-    base_trusted_hosts = [
-        "localhost", 
-        "127.0.0.1", 
-        "0.0.0.0", 
-        "ticketradar.izlx.de",
-        "app",  # Docker容器内部服务名
-        "ticketradar-app",  # Docker容器名称
-        "*.ticketradar-network",  # Docker网络内的主机
-        "172.*",  # Docker默认网络段
-        "10.*"   # 额外网络段支持
-    ]
-    
-    # 从环境变量添加额外的受信任主机
-    extra_hosts = os.getenv("EXTRA_TRUSTED_HOSTS", "")
-    if extra_hosts:
-        extra_hosts_list = [host.strip() for host in extra_hosts.split(",") if host.strip()]
-        base_trusted_hosts.extend(extra_hosts_list)
-    
-    TRUSTED_HOSTS = base_trusted_hosts
+# 在Docker环境中，由于Nginx代理和容器网络的复杂性，
+# 使用更宽松的策略，安全性由外层Nginx和防火墙保证
+TRUSTED_HOSTS = ["*"]
 
 # 日志配置
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
