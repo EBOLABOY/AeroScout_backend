@@ -269,14 +269,7 @@ def setup_performance_middleware(app):
     app.add_middleware(ResponseOptimizationMiddleware)
     
     # 5. 性能监控（最后添加，确保监控所有请求）
-    performance_monitor = PerformanceMonitoringMiddleware(app)
     app.add_middleware(PerformanceMonitoringMiddleware, enable_logging=True)
-    
-    # 添加性能统计端点
-    @app.get("/api/performance/stats")
-    async def get_performance_stats():
-        """获取性能统计信息"""
-        return performance_monitor.get_stats()
     
     logger.info("✅ 性能优化中间件设置完成")
     return app
