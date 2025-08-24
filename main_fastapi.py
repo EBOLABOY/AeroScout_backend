@@ -31,13 +31,11 @@ from fastapi_app.config import settings
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时执行
-    from fastapi_app.config.logging_config import setup_development_logging, setup_production_logging
-
-    # 根据环境变量配置日志
-    if settings.DEBUG:
-        setup_development_logging()
-    else:
-        setup_production_logging()
+    from fastapi_app.config.logging_config import setup_logging
+    from fastapi_app.config.settings import LOG_LEVEL
+    
+    # 根据LOG_LEVEL环境变量配置日志
+    setup_logging(level=LOG_LEVEL)
 
     logger.info("🚀 FastAPI应用启动中...")
 
