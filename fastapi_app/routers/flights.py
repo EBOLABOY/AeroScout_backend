@@ -731,6 +731,9 @@ async def start_ai_enhanced_search_async(
             search_params=search_params,
             user_id=user_id
         )
+        
+        # 智能时间预估
+        estimated_duration = _estimate_search_time(search_params)
 
         # 启动后台任务
         asyncio.create_task(
@@ -743,8 +746,8 @@ async def start_ai_enhanced_search_async(
             data={
                 "task_id": task_id,
                 "status": "PENDING",
-                "estimated_duration": 120,
-                "polling_interval": 5  # 建议5秒轮询一次
+                "estimated_duration": estimated_duration,
+                "polling_interval": 2  # 建议2秒轮询一次，更加流畅
             }
         )
 
@@ -891,30 +894,133 @@ async def get_task_result(
 
 # ==================== 后台任务执行函数 ====================
 
+def _estimate_search_time(search_params: Dict[str, Any]) -> int:
+    """
+    智能估算搜索完成时间（秒）
+    基于搜索参数的复杂度动态计算
+    """
+    base_time = 45  # 基础时间45秒
+    
+    # 根据用户偏好增加时间
+    if search_params.get("user_preferences") and len(search_params["user_preferences"]) > 20:
+        base_time += 15  # AI分析需要额外时间
+    
+    # 根据用户类型调整
+    if search_params.get("is_guest_user"):
+        base_time -= 10  # 游客用户使用简化搜索
+    else:
+        base_time += 20  # 登录用户使用完整搜索
+    
+    # 根据日期距离调整（未来30天内的搜索通常更快）
+    try:
+        from datetime import datetime, timedelta
+        depart_date = datetime.strptime(search_params["depart_date"], "%Y-%m-%d")
+        days_ahead = (depart_date - datetime.now()).days
+        if days_ahead > 30:
+            base_time += 10  # 远期航班搜索更复杂
+    except:
+        pass
+    
+    # 往返程搜索需要更多时间
+    if search_params.get("return_date"):
+        base_time += 15
+    
+    # 多人搜索稍微增加时间
+    passengers = search_params.get("adults", 1) + search_params.get("children", 0)
+    if passengers > 2:
+        base_time += 5
+    
+    # 确保时间在合理范围内
+    return max(30, min(base_time, 180))  # 30秒-3分钟之间
+
+
+def _get_progress_stage(progress: float) -> str:
+    """根据进度返回当前阶段"""
+    if progress < 0.1:
+        return "initialization"
+    elif progress < 0.6:
+        return "searching"
+    elif progress < 0.9:
+        return "ai_analysis"
+    elif progress < 1.0:
+        return "finalizing"
+    else:
+        return "completed"
+
+
+def _calculate_remaining_time(progress: float, estimated_total: int) -> int:
+    """计算剩余时间（秒）"""
+    if progress >= 1.0:
+        return 0
+    if progress <= 0:
+        return estimated_total
+    
+    # 基于当前进度计算剩余时间
+    remaining_ratio = (1.0 - progress)
+    remaining_time = int(estimated_total * remaining_ratio)
+    
+    # 确保剩余时间合理
+    return max(5, min(remaining_time, estimated_total))
+
+
 async def _execute_ai_search_background(task_id: str, search_params: Dict[str, Any]):
     """
-    后台执行AI增强搜索
+    后台执行AI增强搜索 - 增强版进度报告
     """
     try:
         logger.info(f"开始执行后台AI搜索任务: {task_id}")
 
-        # 更新任务状态为处理中
+        # 阶段1: 初始化 (0-10%)
+        await async_task_service.update_task_status(
+            task_id,
+            TaskStatus.PROCESSING,
+            progress=0.05,
+            message="正在初始化搜索引擎..."
+        )
+        
+        await asyncio.sleep(0.5)  # 让前端看到进度变化
+        
         await async_task_service.update_task_status(
             task_id,
             TaskStatus.PROCESSING,
             progress=0.1,
-            message="开始AI增强搜索..."
+            message="正在连接航空公司数据库..."
         )
 
         # 创建AI搜索服务实例
         flight_service = AIFlightService()
 
-        # 更新进度
+        # 阶段2: 数据收集 (10-60%)
         await async_task_service.update_task_status(
             task_id,
             TaskStatus.PROCESSING,
-            progress=0.2,
-            message="正在收集航班数据..."
+            progress=0.15,
+            message="正在搜索基础航班数据..."
+        )
+        
+        # 模拟搜索过程中的进度更新
+        search_stages = [
+            (0.25, "正在查询主要航空公司..."),
+            (0.35, "正在查询廉价航空公司..."),
+            (0.45, "正在搜索隐藏城市机会..."),
+            (0.55, "正在收集价格信息...")
+        ]
+        
+        for progress, message in search_stages:
+            await async_task_service.update_task_status(
+                task_id,
+                TaskStatus.PROCESSING,
+                progress=progress,
+                message=message
+            )
+            await asyncio.sleep(0.3)  # 短暂延迟显示进度
+
+        # 阶段3: AI分析 (60-90%)
+        await async_task_service.update_task_status(
+            task_id,
+            TaskStatus.PROCESSING,
+            progress=0.60,
+            message="正在进行AI数据分析..."
         )
 
         # 执行AI增强搜索
@@ -936,6 +1042,23 @@ async def _execute_ai_search_background(task_id: str, search_params: Dict[str, A
             is_guest_user=search_params.get("is_guest_user", False)
         )
 
+        # 阶段4: 结果处理 (90-100%)
+        await async_task_service.update_task_status(
+            task_id,
+            TaskStatus.PROCESSING,
+            progress=0.85,
+            message="正在生成个性化推荐..."
+        )
+        
+        await asyncio.sleep(0.2)
+        
+        await async_task_service.update_task_status(
+            task_id,
+            TaskStatus.PROCESSING,
+            progress=0.95,
+            message="正在最终确认结果..."
+        )
+
         # 保存搜索结果
         await async_task_service.save_task_result(task_id, result)
 
@@ -944,10 +1067,10 @@ async def _execute_ai_search_background(task_id: str, search_params: Dict[str, A
             task_id,
             TaskStatus.COMPLETED,
             progress=1.0,
-            message="AI搜索完成"
+            message="搜索完成"
         )
 
-        logger.info(f"后台AI搜索任务完成: {task_id}")
+        logger.info(f"后台AI搜索任务完成: {task_id}, 找到 {len(result.get('flights', []))} 个航班")
 
     except Exception as e:
         logger.error(f"后台AI搜索任务失败 {task_id}: {e}")
@@ -1013,16 +1136,19 @@ async def stream_task_status(
 
             # 发送初始状态
             initial_status = task_info.get("status", "PENDING")
+            initial_progress = task_info.get("progress", 0)
             initial_data = {
                 "status": initial_status,
-                "progress": task_info.get("progress", 0),
+                "progress": initial_progress,
                 "message": task_info.get("message", ""),
                 "task_id": task_id,
                 "created_at": task_info.get("created_at"),
-                "updated_at": task_info.get("updated_at")
+                "updated_at": task_info.get("updated_at"),
+                "estimated_duration": task_info.get("estimated_duration", _estimate_search_time({})),
+                "reconnected": True if "last_event_id" in locals() else False  # 标记是否为重连
             }
 
-            logger.info(f"📤 SSE发送初始状态: {task_id} -> {initial_status}")
+            logger.info(f"📤 SSE发送初始状态: {task_id} -> {initial_status} ({initial_progress}%)")
             yield f"data: {json.dumps(initial_data, ensure_ascii=False)}\n\n"
 
             # 如果任务已完成，发送结果并结束
@@ -1122,7 +1248,9 @@ async def stream_task_status(
                             "progress": current_progress,
                             "message": current_message,
                             "task_id": task_id,
-                            "updated_at": current_updated
+                            "updated_at": current_updated,
+                            "stage": _get_progress_stage(current_progress),  # 添加阶段信息
+                            "estimated_remaining": _calculate_remaining_time(current_progress, task_info.get("estimated_duration", 60))
                         }
 
                         logger.info(f"📤 SSE发送状态更新: {task_id} -> {current_status} ({current_progress}%)")
