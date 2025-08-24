@@ -182,7 +182,8 @@ class AIFlightService:
                 language=language,
                 departure_code=departure_code,
                 destination_code=destination_code,
-                user_preferences=user_preferences
+                user_preferences=user_preferences,
+                is_guest_user=is_guest_user
             )
 
             if ai_processed_result['success']:
@@ -1271,7 +1272,8 @@ You must strictly follow this key principle: The most successful Skiplagging opp
         language: str = "zh",
         departure_code: str = "",
         destination_code: str = "",
-        user_preferences: str = ""
+        user_preferences: str = "",
+        is_guest_user: bool = False
     ) -> Dict[str, Any]:
         """
         使用AI处理航班数据，支持重试机制
@@ -1435,7 +1437,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 logger.info(f"📊 [AI处理] 最终处理{final_total}条航班数据，使用重试机制")
                 processed_data = await self._process_with_fallback_ai(
                     google_flights, kiwi_flights, ai_flights,
-                    language, departure_code, destination_code, user_preferences
+                    language, departure_code, destination_code, user_preferences, is_guest_user
                 )
 
                 # 记录processed_data的基本信息
@@ -1729,8 +1731,8 @@ You must strictly follow this key principle: The most successful Skiplagging opp
     # 移除多轮对话方法，统一使用单轮对话处理
 
     async def _process_with_fallback_ai(self, google_flights, kiwi_flights, ai_flights,
-                                       language, departure_code, destination_code, user_preferences):
-        """使用重试机制处理航班数据，使用环境变量配置的模型"""
+                                       language, departure_code, destination_code, user_preferences, is_guest_user=False):
+        """使用重试机制处理航班数据，根据用户类型选择不同模型"""
         max_retries = 3
 
         for attempt in range(max_retries):
@@ -1743,18 +1745,24 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                     language, departure_code, destination_code, user_preferences
                 )
 
-                # 使用环境变量配置的AI模型
-                from ..config.settings import AI_MODEL
-                model_name = AI_MODEL
+                # 根据用户类型选择不同的AI模型
+                from ..config.settings import AI_MODEL, AI_MODEL_AUTHENTICATED
+                if is_guest_user:
+                    model_name = AI_MODEL  # 游客用户使用默认模型
+                    user_type_desc = "游客用户"
+                else:
+                    model_name = AI_MODEL_AUTHENTICATED  # 登录用户使用专用模型
+                    user_type_desc = "登录用户"
+                
                 payload_size = len(prompt.encode('utf-8'))
-                logger.info(f"🤖 使用配置的AI模型: {model_name} (数据量: {payload_size:,}字节)")
+                logger.info(f"🤖 {user_type_desc}使用AI模型: {model_name} (数据量: {payload_size:,}字节)")
 
                 result = await self._call_ai_api(prompt, model_name, language, enable_fallback=False)
 
                 if result and result.get('success'):
                     ai_content = result.get('content', '')
 
-                    logger.info(f"✅ AI处理成功，使用模型: {model_name}")
+                    logger.info(f"✅ AI处理成功，{user_type_desc}使用模型: {model_name}")
                     logger.info(f"📝 AI返回内容长度: {len(ai_content)} 字符")
                     
                     if ai_content:
@@ -1768,6 +1776,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                             'summary': {
                                 'markdown_format': True,
                                 'model_used': model_name,
+                                'user_type': user_type_desc,
                                 'processing_method': 'single_turn_with_retry',
                                 'attempt': attempt + 1
                             }
@@ -1805,6 +1814,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                         'summary': {
                             'markdown_format': True,
                             'model_used': 'fallback',
+                            'user_type': user_type_desc if 'user_type_desc' in locals() else 'unknown',
                             'processing_method': 'fallback_report',
                             'error': 'AI模型暂时不可用，已生成基础分析报告'
                         }

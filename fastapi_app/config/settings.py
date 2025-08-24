@@ -44,6 +44,9 @@ AI_API_KEY = os.getenv("AI_API_KEY")
 AI_API_URL = os.getenv("AI_API_URL", "http://154.19.184.12:3000/v1")
 AI_MODEL = os.getenv("AI_MODEL", "gemini-2.5-pro")
 
+# 登录用户专用AI模型配置
+AI_MODEL_AUTHENTICATED = os.getenv("AI_MODEL_AUTHENTICATED", "gemini-2.5-pro")
+
 # 测试数据保存配置
 ENABLE_TEST_DATA_SAVE = os.getenv("ENABLE_TEST_DATA_SAVE", "False").lower() == "true"
 TEST_DATA_DIR = os.getenv("TEST_DATA_DIR", "./test_data")
@@ -135,6 +138,7 @@ class Settings:
         self.AI_API_KEY = AI_API_KEY
         self.AI_API_URL = AI_API_URL
         self.AI_MODEL = AI_MODEL
+        self.AI_MODEL_AUTHENTICATED = AI_MODEL_AUTHENTICATED
 
         # 测试数据保存配置
         self.ENABLE_TEST_DATA_SAVE = ENABLE_TEST_DATA_SAVE
