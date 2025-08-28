@@ -32,29 +32,29 @@ class FlightDataFilter:
             'processing_time': 0.0
         }
         
-        # 数据保存配置 - 自动检测环境
+        # 数据保存配置 - 优先保存到本地路径
         self.data_save_enabled = True
         
-        # 强制优先使用临时目录（解决权限问题）
-        temp_path = "/tmp/data_analysis"
-        docker_path = "/app/data_analysis" 
+        # 本地持久化路径配置
+        docker_persistent_path = "/app/data_analysis"  # Docker挂载到本地的持久化目录
+        local_dev_path = None
         
-        # 优先级调整：临时目录优先，确保数据能够保存
-        if os.path.exists("/tmp"):
-            # 优先使用临时目录（容器内100%可写）
-            self.save_directory = temp_path
-            logger.info(f"使用临时目录避免权限问题: {self.save_directory}")
-        elif os.path.exists("/app"):
-            # 备选Docker挂载目录
-            self.save_directory = docker_path
-            logger.info(f"使用Docker挂载目录: {self.save_directory}")
+        # 检测运行环境并设置保存路径
+        if os.path.exists("/app"):
+            # Docker环境：优先使用挂载到本地的持久化目录
+            self.save_directory = docker_persistent_path
+            logger.info(f"Docker环境：使用本地挂载目录保存数据: {self.save_directory}")
         else:
             # 本地开发环境 - 使用项目根目录下的data_analysis
             current_file = os.path.abspath(__file__)
             # 从 fastapi_app/utils/flight_data_filter.py 回到项目根目录
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
-            self.save_directory = os.path.join(project_root, "data_analysis")
-            logger.info(f"本地开发环境: {self.save_directory}")
+            local_dev_path = os.path.join(project_root, "data_analysis")
+            self.save_directory = local_dev_path
+            logger.info(f"本地开发环境：使用项目目录保存数据: {self.save_directory}")
+        
+        # 备选临时目录（仅当主目录不可用时使用）
+        self.fallback_temp_directory = "/tmp/data_analysis"
         
         self.ensure_save_directory()
         
@@ -122,11 +122,11 @@ class FlightDataFilter:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"data_comparison_{timestamp}.json"
             
-            # 尝试多个保存路径
+            # 优先使用配置的保存目录，备选使用临时目录
             possible_paths = [
-                self.save_directory,  # 首选路径
-                "/tmp/data_analysis",  # 临时目录备选
-                "./data_analysis"      # 相对路径备选
+                self.save_directory,  # 主要保存路径（本地挂载目录或项目目录）
+                self.fallback_temp_directory,  # 备选临时目录（仅权限问题时使用）
+                "./data_analysis"      # 相对路径最后备选
             ]
             
             saved_path = ""
