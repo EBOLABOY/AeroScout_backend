@@ -86,3 +86,6 @@ dmypy.json
 
 # 测试数据备份目录 - 包含真实用户数据
 test_data_backup/
+
+# 数据分析目录 - 包含航班搜索对比数据
+data_analysis/

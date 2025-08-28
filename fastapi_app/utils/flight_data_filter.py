@@ -32,29 +32,30 @@ class FlightDataFilter:
             'processing_time': 0.0
         }
         
-        # 数据保存配置 - 优先保存到本地路径
-        self.data_save_enabled = True
+        # 数据保存配置 - 直接从环境变量读取
+        save_enabled_env = os.getenv("SAVE_FLIGHT_DATA", "false").lower()
+        self.data_save_enabled = save_enabled_env in ("true", "1", "yes", "on")
         
-        # 本地持久化路径配置
-        docker_persistent_path = "/app/data_analysis"  # Docker挂载到本地的持久化目录
-        local_dev_path = None
-        
-        # 检测运行环境并设置保存路径
-        if os.path.exists("/app"):
-            # Docker环境：优先使用挂载到本地的持久化目录
-            self.save_directory = docker_persistent_path
-            logger.info(f"Docker环境：使用本地挂载目录保存数据: {self.save_directory}")
+        if self.data_save_enabled:
+            # 检测运行环境并设置保存路径
+            if os.path.exists("/app"):
+                # Docker环境：使用挂载到本地的持久化目录
+                self.save_directory = "/app/data_analysis"
+                logger.info(f"Docker环境：数据保存已启用 -> {self.save_directory}")
+            else:
+                # 本地开发环境：使用项目根目录
+                current_file = os.path.abspath(__file__)
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
+                self.save_directory = os.path.join(project_root, "data_analysis")
+                logger.info(f"本地环境：数据保存已启用 -> {self.save_directory}")
+            
+            # 备选临时目录
+            self.fallback_temp_directory = "/tmp/data_analysis"
         else:
-            # 本地开发环境 - 使用项目根目录下的data_analysis
-            current_file = os.path.abspath(__file__)
-            # 从 fastapi_app/utils/flight_data_filter.py 回到项目根目录
-            project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
-            local_dev_path = os.path.join(project_root, "data_analysis")
-            self.save_directory = local_dev_path
-            logger.info(f"本地开发环境：使用项目目录保存数据: {self.save_directory}")
-        
-        # 备选临时目录（仅当主目录不可用时使用）
-        self.fallback_temp_directory = "/tmp/data_analysis"
+            # 数据保存功能已禁用
+            self.save_directory = None
+            self.fallback_temp_directory = None
+            logger.info("数据保存功能已禁用 (设置 SAVE_FLIGHT_DATA=true 启用)")
         
         self.ensure_save_directory()
         
@@ -72,9 +73,9 @@ class FlightDataFilter:
         self.flight_leg_start_pattern = re.compile(r'FlightLeg\(')
         self.hidden_info_start_pattern = re.compile(r"hidden_city_info=")
         
-        # 航段解析相关预编译模式
+        # 航段解析相关预编译模式（修复引号匹配问题）
         self.airline_pattern = re.compile(r"airline=<Airline\.([^:]+):")
-        self.flight_number_pattern = re.compile(r"flight_number='([^']+)'")
+        self.flight_number_pattern = re.compile(r"flight_number=[\"']([^\"']+)[\"']")  # 支持单引号和双引号
         self.dep_airport_pattern = re.compile(r"departure_airport=<Airport\.([^:]+):")
         self.arr_airport_pattern = re.compile(r"arrival_airport=<Airport\.([^:]+):")
         self.dep_time_pattern = re.compile(r"departure_datetime=datetime\.datetime\(([^)]+)\)")
@@ -91,13 +92,16 @@ class FlightDataFilter:
         
     def ensure_save_directory(self):
         """确保数据保存目录存在"""
-        if self.data_save_enabled:
+        if self.data_save_enabled and self.save_directory:
             try:
                 os.makedirs(self.save_directory, exist_ok=True)
                 logger.info(f"数据保存目录已确保存在: {self.save_directory}")
             except Exception as e:
                 logger.warning(f"创建数据保存目录失败: {e}")
+                # 如果主目录创建失败，禁用数据保存功能
                 self.data_save_enabled = False
+        elif not self.data_save_enabled:
+            logger.debug("数据保存功能已禁用，跳过目录创建")
     
     def save_data_comparison(self, 
                            original_data: Dict[str, Any], 
@@ -115,6 +119,10 @@ class FlightDataFilter:
             保存文件的路径
         """
         if not self.data_save_enabled:
+            logger.debug("数据保存功能已禁用，跳过数据保存")
+            return ""
+            
+        if not self.save_directory:
             return ""
             
         try:
@@ -261,7 +269,7 @@ class FlightDataFilter:
                 'stops': stops,
                 'departure_time': legs[0]['departure_time'] if legs else None,
                 'arrival_time': legs[-1]['arrival_time'] if legs else None,
-                'route': f"{legs[0]['from']} → {legs[-1]['to']}" if legs else None,
+                'route': f"{legs[0]['departure_airport']} → {legs[-1]['arrival_airport']}" if legs else None,
                 'legs': legs
             }
             
@@ -455,6 +463,11 @@ class FlightDataFilter:
                 'route_path': flight_data.get('route_path'),
                 'route_description': flight_data.get('route_description'),
                 
+                # 保留航班详细信息
+                'carrier_code': flight_data.get('carrier_code'),
+                'carrier_name': flight_data.get('carrier_name'),
+                'flight_number': flight_data.get('flight_number'),
+                
                 # *** 关键修复：保留隐藏航班相关的所有重要字段 ***
                 'is_hidden_city': flight_data.get('is_hidden_city', False),
                 'is_throwaway': flight_data.get('is_throwaway', False),
@@ -607,10 +620,10 @@ class FlightDataFilter:
             duration = int(duration_match.group(1)) if duration_match else None
             
             return {
-                'airline': airline_code,
+                'airline_code': airline_code,  # 统一命名为airline_code
                 'flight_number': flight_number,
-                'from': dep_airport,
-                'to': arr_airport,
+                'departure_airport': dep_airport,  # 统一命名为departure_airport
+                'arrival_airport': arr_airport,    # 统一命名为arrival_airport
                 'departure_time': dep_time,
                 'arrival_time': arr_time,
                 'duration_minutes': duration
@@ -841,61 +854,82 @@ class FlightDataFilter:
         for flight_data in raw_flights:
             cleaned_flight = None
             
-            # 处理不同类型的flight对象
-            if hasattr(flight_data, 'model_dump'):
-                flight_dict = flight_data.model_dump()
-                
-                # 对转换后的字典进行相应的清理
-                if data_source == 'google_flights':
+            # 以数据源为主要判断条件，避免逻辑冲突
+            if data_source == 'google_flights':
+                # Google Flights 数据处理
+                if hasattr(flight_data, 'model_dump'):
+                    flight_dict = flight_data.model_dump()
                     cleaned_flight = self.clean_google_flight_dict_data(flight_dict)
-                elif data_source == 'kiwi':
-                    cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
-                elif data_source == 'ai_recommended':
-                    cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
-                    if cleaned_flight:
-                        cleaned_flight['source'] = self.source_mapping['ai_recommended']
-                        
-            elif hasattr(flight_data, '__dict__') and not isinstance(flight_data, (str, dict, list, int, float)):
-                try:
-                    if hasattr(flight_data, 'to_dict'):
-                        flight_dict = flight_data.to_dict()
-                    elif hasattr(flight_data, '__dict__'):
-                        flight_dict = vars(flight_data)
-                    else:
-                        flight_dict = {}
-                        
-                    # 对转换后的字典进行相应的清理
-                    if data_source == 'google_flights':
+                elif hasattr(flight_data, '__dict__') and not isinstance(flight_data, (str, dict, list, int, float)):
+                    try:
+                        if hasattr(flight_data, 'to_dict'):
+                            flight_dict = flight_data.to_dict()
+                        else:
+                            flight_dict = vars(flight_data)
                         cleaned_flight = self.clean_google_flight_dict_data(flight_dict)
-                    elif data_source == 'kiwi':
-                        cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
-                    elif data_source == 'ai_recommended':
-                        cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
-                        if cleaned_flight:
-                            cleaned_flight['source'] = self.source_mapping['ai_recommended']
-                            
-                except Exception as e:
-                    logger.warning(f"[{data_source}] 对象转换失败: {e}")
-                    
-            elif data_source == 'google_flights':
-                if isinstance(flight_data, str):
+                    except Exception as e:
+                        logger.warning(f"[Google Flights] 对象转换失败: {e}")
+                elif isinstance(flight_data, str):
                     cleaned_flight = self.clean_google_flight_data(flight_data)
                 elif isinstance(flight_data, dict):
                     cleaned_flight = flight_data
+                else:
+                    logger.warning(f"[Google Flights] 未知数据类型: {type(flight_data)}")
                     
-            elif data_source == 'kiwi' and isinstance(flight_data, dict):
-                cleaned_flight = self.clean_kiwi_flight_data(flight_data)
-                
+            elif data_source == 'kiwi':
+                # Kiwi 数据处理
+                if hasattr(flight_data, 'model_dump'):
+                    flight_dict = flight_data.model_dump()
+                    cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
+                elif hasattr(flight_data, '__dict__') and not isinstance(flight_data, (str, dict, list, int, float)):
+                    try:
+                        if hasattr(flight_data, 'to_dict'):
+                            flight_dict = flight_data.to_dict()
+                        else:
+                            flight_dict = vars(flight_data)
+                        cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
+                    except Exception as e:
+                        logger.warning(f"[Kiwi] 对象转换失败: {e}")
+                elif isinstance(flight_data, dict):
+                    cleaned_flight = self.clean_kiwi_flight_data(flight_data)
+                else:
+                    logger.warning(f"[Kiwi] 未知数据类型: {type(flight_data)}")
+                    
             elif data_source == 'ai_recommended':
+                # AI 推荐数据处理（重要：优先处理字符串格式的AI数据）
                 if isinstance(flight_data, str):
+                    # 字符串格式的AI数据包含完整的hidden_city_info，使用专用解析器
                     cleaned_flight = self.clean_ai_flight_data(flight_data)
+                elif hasattr(flight_data, 'model_dump'):
+                    flight_dict = flight_data.model_dump()
+                    cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
+                    if cleaned_flight:
+                        cleaned_flight['source'] = self.source_mapping['ai_recommended']
+                elif hasattr(flight_data, '__dict__') and not isinstance(flight_data, (str, dict, list, int, float)):
+                    try:
+                        if hasattr(flight_data, 'to_dict'):
+                            flight_dict = flight_data.to_dict()
+                        else:
+                            flight_dict = vars(flight_data)
+                        cleaned_flight = self.clean_kiwi_flight_data(flight_dict)
+                        if cleaned_flight:
+                            cleaned_flight['source'] = self.source_mapping['ai_recommended']
+                    except Exception as e:
+                        logger.warning(f"[AI推荐] 对象转换失败: {e}")
                 elif isinstance(flight_data, dict):
                     cleaned_flight = self.clean_kiwi_flight_data(flight_data)
                     if cleaned_flight:
                         cleaned_flight['source'] = self.source_mapping['ai_recommended']
-                
-            elif isinstance(flight_data, str):
-                cleaned_flight = self.clean_google_flight_data(flight_data)
+                else:
+                    logger.warning(f"[AI推荐] 未知数据类型: {type(flight_data)}")
+            
+            else:
+                # 未知数据源的降级处理
+                logger.warning(f"未知数据源: {data_source}，尝试通用处理")
+                if isinstance(flight_data, str):
+                    cleaned_flight = self.clean_google_flight_data(flight_data)
+                elif isinstance(flight_data, dict):
+                    cleaned_flight = flight_data
             
             if cleaned_flight:
                 # 清理冗余字段
