@@ -32,9 +32,23 @@ class FlightDataFilter:
             'processing_time': 0.0
         }
         
-        # 数据保存配置
-        self.data_save_enabled = True  # 启用数据保存
-        self.save_directory = "/app/data_analysis"  # Docker内路径，会挂载到本地
+        # 数据保存配置 - 自动检测环境
+        self.data_save_enabled = True
+        
+        # 根据环境选择保存路径
+        docker_path = "/app/data_analysis"
+        if os.path.exists("/app"):
+            # Docker环境
+            self.save_directory = docker_path
+            logger.info(f"检测到Docker环境，使用路径: {self.save_directory}")
+        else:
+            # 本地开发环境 - 使用项目根目录下的data_analysis
+            current_file = os.path.abspath(__file__)
+            # 从 fastapi_app/utils/flight_data_filter.py 回到项目根目录
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
+            self.save_directory = os.path.join(project_root, "data_analysis")
+            logger.info(f"检测到本地环境，使用路径: {self.save_directory}")
+        
         self.ensure_save_directory()
         
         # 数据来源混淆映射 - 隐藏真实API提供商

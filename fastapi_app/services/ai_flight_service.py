@@ -183,7 +183,12 @@ class AIFlightService:
                 departure_code=departure_code,
                 destination_code=destination_code,
                 user_preferences=user_preferences,
-                is_guest_user=is_guest_user
+                is_guest_user=is_guest_user,
+                depart_date=depart_date,
+                return_date=return_date,
+                adults=adults,
+                seat_class=seat_class,
+                currency=currency
             )
 
             if ai_processed_result['success']:
@@ -1273,7 +1278,13 @@ You must strictly follow this key principle: The most successful Skiplagging opp
         departure_code: str = "",
         destination_code: str = "",
         user_preferences: str = "",
-        is_guest_user: bool = False
+        is_guest_user: bool = False,
+        # 添加额外的搜索参数用于数据保存
+        depart_date: str = "",
+        return_date: str = None,
+        adults: int = 1,
+        seat_class: str = "ECONOMY",
+        currency: str = "CNY"
     ) -> Dict[str, Any]:
         """
         使用AI处理航班数据，支持重试机制
@@ -1452,7 +1463,8 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 logger.info(f"📊 [AI处理] 最终处理{final_total}条航班数据，使用重试机制")
                 processed_data = await self._process_with_fallback_ai(
                     google_flights, kiwi_flights, ai_flights,
-                    language, departure_code, destination_code, user_preferences, is_guest_user
+                    language, departure_code, destination_code, user_preferences, is_guest_user,
+                    depart_date, return_date, adults, seat_class, currency
                 )
 
                 # 记录processed_data的基本信息
@@ -1746,7 +1758,8 @@ You must strictly follow this key principle: The most successful Skiplagging opp
     # 移除多轮对话方法，统一使用单轮对话处理
 
     async def _process_with_fallback_ai(self, google_flights, kiwi_flights, ai_flights,
-                                       language, departure_code, destination_code, user_preferences, is_guest_user=False):
+                                       language, departure_code, destination_code, user_preferences, is_guest_user=False,
+                                       depart_date="", return_date=None, adults=1, seat_class="ECONOMY", currency="CNY"):
         """使用重试机制处理航班数据，根据用户类型选择不同模型"""
         max_retries = 3
 
