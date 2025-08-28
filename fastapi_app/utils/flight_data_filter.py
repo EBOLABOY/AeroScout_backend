@@ -35,19 +35,26 @@ class FlightDataFilter:
         # 数据保存配置 - 自动检测环境
         self.data_save_enabled = True
         
-        # 根据环境选择保存路径
-        docker_path = "/app/data_analysis"
-        if os.path.exists("/app"):
-            # Docker环境
+        # 强制优先使用临时目录（解决权限问题）
+        temp_path = "/tmp/data_analysis"
+        docker_path = "/app/data_analysis" 
+        
+        # 优先级调整：临时目录优先，确保数据能够保存
+        if os.path.exists("/tmp"):
+            # 优先使用临时目录（容器内100%可写）
+            self.save_directory = temp_path
+            logger.info(f"使用临时目录避免权限问题: {self.save_directory}")
+        elif os.path.exists("/app"):
+            # 备选Docker挂载目录
             self.save_directory = docker_path
-            logger.info(f"检测到Docker环境，使用路径: {self.save_directory}")
+            logger.info(f"使用Docker挂载目录: {self.save_directory}")
         else:
             # 本地开发环境 - 使用项目根目录下的data_analysis
             current_file = os.path.abspath(__file__)
             # 从 fastapi_app/utils/flight_data_filter.py 回到项目根目录
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
             self.save_directory = os.path.join(project_root, "data_analysis")
-            logger.info(f"检测到本地环境，使用路径: {self.save_directory}")
+            logger.info(f"本地开发环境: {self.save_directory}")
         
         self.ensure_save_directory()
         
@@ -114,7 +121,38 @@ class FlightDataFilter:
             # 生成文件名（包含时间戳）
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"data_comparison_{timestamp}.json"
-            filepath = os.path.join(self.save_directory, filename)
+            
+            # 尝试多个保存路径
+            possible_paths = [
+                self.save_directory,  # 首选路径
+                "/tmp/data_analysis",  # 临时目录备选
+                "./data_analysis"      # 相对路径备选
+            ]
+            
+            saved_path = ""
+            for base_path in possible_paths:
+                try:
+                    # 确保目录存在
+                    os.makedirs(base_path, exist_ok=True)
+                    
+                    # 尝试写入测试文件
+                    test_file = os.path.join(base_path, "test_write.tmp")
+                    with open(test_file, 'w') as f:
+                        f.write("test")
+                    os.remove(test_file)
+                    
+                    # 如果测试成功，使用此路径
+                    filepath = os.path.join(base_path, filename)
+                    break
+                except PermissionError:
+                    logger.warning(f"路径 {base_path} 无写入权限，尝试下一个路径")
+                    continue
+                except Exception as e:
+                    logger.warning(f"路径 {base_path} 测试失败: {e}")
+                    continue
+            else:
+                logger.error("所有保存路径都无法写入，跳过数据保存")
+                return ""
             
             # 计算数据统计
             original_stats = self._calculate_data_stats(original_data)
@@ -125,6 +163,7 @@ class FlightDataFilter:
                 "metadata": {
                     "timestamp": datetime.now().isoformat(),
                     "search_params": search_params or {},
+                    "save_path": filepath,
                     "compression_stats": {
                         "original_size": original_stats,
                         "cleaned_size": cleaned_stats,

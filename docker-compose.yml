@@ -15,6 +15,7 @@ services:
     volumes:
       - app-logs:/app/logs  # 使用命名卷而非绑定挂载
       - ./data_analysis:/app/data_analysis  # 数据分析文件保存目录
+      - /tmp/data_analysis:/tmp/data_analysis  # 备用临时目录
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

@@ -27,8 +27,9 @@ RUN chmod +x /init-logs.sh
 
 # 创建非root用户和必要目录
 RUN useradd --create-home --shell /bin/bash app \
-    && mkdir -p /app/logs \
-    && chown -R app:app /app
+    && mkdir -p /app/logs /app/data_analysis \
+    && chown -R app:app /app \
+    && chmod 755 /app/data_analysis
 USER app
 
 # 暴露端口

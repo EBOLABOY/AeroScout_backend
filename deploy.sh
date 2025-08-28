@@ -15,6 +15,7 @@ command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 || {
 echo "📁 创建必要的目录..."
 mkdir -p logs/nginx
 mkdir -p ssl
+mkdir -p data_analysis  # 添加数据分析目录
 
 # 检查 .env 文件
 if [ ! -f .env ]; then
@@ -39,6 +40,10 @@ docker compose down --remove-orphans || true
 # 构建并启动服务
 echo "🔨 构建并启动服务..."
 docker compose up -d --build
+
+# 设置数据分析目录权限（确保容器可以写入）
+echo "🔐 设置数据分析目录权限..."
+chmod 755 data_analysis 2>/dev/null || echo "⚠️  权限设置跳过 (可能是Windows环境)"
 
 # 等待服务启动
 echo "⏳ 等待服务启动..."
@@ -66,5 +71,8 @@ echo "🎉 部署完成！"
 echo "📍 访问地址: https://apiticketradar.izlx.de"
 echo "🔒 SSL证书: Cloudflare Origin 证书"
 echo "📊 查看日志: docker compose logs -f"
+echo "📂 数据分析文件: ./data_analysis/"
 echo "🔧 管理服务: docker compose [start|stop|restart]"
 echo "💡 管理工具: ./manage.sh [status|health|logs]"
+echo ""
+echo "✅ 数据保存功能已就绪！每次航班搜索后，对比数据将自动保存到 ./data_analysis/ 目录"
