@@ -1389,11 +1389,26 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                         'ai_size': safe_json_size(ai_flights)
                     }
                     
-                    # 清理多源数据的冗余字段
+                    # 清理多源数据的冗余字段，并保存数据对比
+                    search_params_for_save = {
+                        'departure_code': departure_code,
+                        'destination_code': destination_code,
+                        'depart_date': depart_date,
+                        'return_date': return_date,
+                        'adults': adults,
+                        'seat_class': seat_class,
+                        'language': language,
+                        'currency': currency,
+                        'is_guest_user': is_guest_user,
+                        'user_preferences': user_preferences
+                    }
+                    
                     cleaned_data = self.data_filter.clean_multi_source_data(
                         google_flights=google_flights,
                         kiwi_flights=kiwi_flights,
-                        ai_flights=ai_flights
+                        ai_flights=ai_flights,
+                        search_params=search_params_for_save,
+                        save_comparison=True  # 启用数据保存
                     )
                     
                     # 计算清理后数据大小（用JSON字符串长度）

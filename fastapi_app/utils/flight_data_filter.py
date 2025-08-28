@@ -10,10 +10,12 @@
 3. 清理AI推荐数据：正确解析hidden_city_info，保留完整上下文
 4. 采用黑名单策略：只删除明确无用的技术字段，确保业务信息完整
 5. 标准化数据格式，确保AI易于理解，大幅减少数据体积
+6. 数据保存功能：支持保存清洗前后数据用于分析对比
 """
 
 import re
 import json
+import os
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Union
 from loguru import logger
@@ -29,6 +31,11 @@ class FlightDataFilter:
             'compression_ratio': 0.0,
             'processing_time': 0.0
         }
+        
+        # 数据保存配置
+        self.data_save_enabled = True  # 启用数据保存
+        self.save_directory = "/app/data_analysis"  # Docker内路径，会挂载到本地
+        self.ensure_save_directory()
         
         # 数据来源混淆映射 - 隐藏真实API提供商
         self.source_mapping = {
@@ -61,6 +68,105 @@ class FlightDataFilter:
         self.fallback_ai_recommended_pattern = re.compile(r"'ai_recommended': True")
         self.fallback_search_method_pattern = re.compile(r"'search_method': '([^']+)'")
         
+    def ensure_save_directory(self):
+        """确保数据保存目录存在"""
+        if self.data_save_enabled:
+            try:
+                os.makedirs(self.save_directory, exist_ok=True)
+                logger.info(f"数据保存目录已确保存在: {self.save_directory}")
+            except Exception as e:
+                logger.warning(f"创建数据保存目录失败: {e}")
+                self.data_save_enabled = False
+    
+    def save_data_comparison(self, 
+                           original_data: Dict[str, Any], 
+                           cleaned_data: Dict[str, Any],
+                           search_params: Dict[str, Any] = None) -> str:
+        """
+        保存清洗前后数据对比文件
+        
+        Args:
+            original_data: 清洗前的原始数据
+            cleaned_data: 清洗后的数据  
+            search_params: 搜索参数（可选）
+            
+        Returns:
+            保存文件的路径
+        """
+        if not self.data_save_enabled:
+            return ""
+            
+        try:
+            # 生成文件名（包含时间戳）
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"data_comparison_{timestamp}.json"
+            filepath = os.path.join(self.save_directory, filename)
+            
+            # 计算数据统计
+            original_stats = self._calculate_data_stats(original_data)
+            cleaned_stats = self._calculate_data_stats(cleaned_data)
+            
+            # 构建对比数据
+            comparison_data = {
+                "metadata": {
+                    "timestamp": datetime.now().isoformat(),
+                    "search_params": search_params or {},
+                    "compression_stats": {
+                        "original_size": original_stats,
+                        "cleaned_size": cleaned_stats,
+                        "reduction_ratio": self._calculate_reduction_ratio(original_stats, cleaned_stats)
+                    }
+                },
+                "original_data": original_data,
+                "cleaned_data": cleaned_data
+            }
+            
+            # 保存JSON文件
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(comparison_data, f, ensure_ascii=False, indent=2, default=str)
+            
+            logger.info(f"数据对比文件已保存: {filepath}")
+            logger.info(f"原始数据大小: {original_stats.get('total_size', 0):,} 字符")
+            logger.info(f"清洗后大小: {cleaned_stats.get('total_size', 0):,} 字符") 
+            logger.info(f"压缩率: {comparison_data['metadata']['compression_stats']['reduction_ratio']:.1f}%")
+            
+            return filepath
+            
+        except Exception as e:
+            logger.error(f"保存数据对比文件失败: {e}")
+            return ""
+    
+    def _calculate_data_stats(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """计算数据统计信息"""
+        try:
+            stats = {
+                "total_size": len(json.dumps(data, ensure_ascii=False, default=str)),
+                "flight_counts": {}
+            }
+            
+            # 统计各数据源的航班数量
+            if "google_flights" in data:
+                stats["flight_counts"]["google_flights"] = len(data["google_flights"])
+            if "kiwi_flights" in data:
+                stats["flight_counts"]["kiwi_flights"] = len(data["kiwi_flights"]) 
+            if "ai_flights" in data:
+                stats["flight_counts"]["ai_flights"] = len(data["ai_flights"])
+                
+            return stats
+        except Exception as e:
+            logger.warning(f"计算数据统计失败: {e}")
+            return {"total_size": 0, "flight_counts": {}}
+    
+    def _calculate_reduction_ratio(self, original_stats: Dict, cleaned_stats: Dict) -> float:
+        """计算数据压缩率"""
+        original_size = original_stats.get("total_size", 0)
+        cleaned_size = cleaned_stats.get("total_size", 0)
+        
+        if original_size == 0:
+            return 0.0
+            
+        return (1 - cleaned_size / original_size) * 100
+    
     
     def get_masked_source(self, original_source: str) -> str:
         """获取混淆后的数据来源标识"""
@@ -782,7 +888,9 @@ class FlightDataFilter:
         self, 
         google_flights: List = None,
         kiwi_flights: List = None, 
-        ai_flights: List = None
+        ai_flights: List = None,
+        search_params: Dict[str, Any] = None,
+        save_comparison: bool = True
     ) -> Dict[str, List[Dict[str, Any]]]:
         """
         清理多源航班数据，删除每条记录中的冗余字段
@@ -791,10 +899,21 @@ class FlightDataFilter:
             google_flights: Google Flights原始数据
             kiwi_flights: Kiwi原始数据
             ai_flights: AI推荐原始数据
+            search_params: 搜索参数（用于保存文件标记）
+            save_comparison: 是否保存数据对比（默认True）
             
         Returns:
             清理后的分类数据
         """
+        # 保存原始数据用于对比
+        original_data = {}
+        if google_flights:
+            original_data['google_flights'] = google_flights
+        if kiwi_flights:
+            original_data['kiwi_flights'] = kiwi_flights
+        if ai_flights:
+            original_data['ai_flights'] = ai_flights
+        
         result = {}
         total_original = 0
         total_cleaned = 0
@@ -815,6 +934,15 @@ class FlightDataFilter:
             total_cleaned += len(result['ai_flights'])
         
         logger.info(f"多源数据清理汇总: {total_original} → {total_cleaned} 条")
+        
+        # 保存数据对比文件
+        if save_comparison and self.data_save_enabled and original_data:
+            try:
+                saved_path = self.save_data_comparison(original_data, result, search_params)
+                if saved_path:
+                    logger.info(f"✅ 数据对比文件已保存到本地: {saved_path}")
+            except Exception as e:
+                logger.error(f"❌ 保存数据对比文件时出错: {e}")
         
         return result
 
