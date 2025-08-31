@@ -288,14 +288,36 @@ class FastAPIMonitorService:
         try:
             logger.info(f"发送通知给任务 {task.get('id', 0)}: {len(low_price_flights)} 个低价航班")
 
-            # 构建用户数据
+            # 获取用户的完整信息（包括PushPlus token等通知设置）
+            db_service = await self.get_db_service()
+            user_id = task.get('user_id')
+            if not user_id:
+                logger.warning(f"任务 {task.get('id', 0)} 缺少用户ID，无法发送通知")
+                return False
+            
+            # 从数据库获取用户的通知设置
+            try:
+                user_info = await db_service.get_user_by_id(user_id)
+                if not user_info:
+                    logger.warning(f"找不到用户 {user_id}，无法发送通知")
+                    return False
+                
+                # 从用户元数据中获取通知设置
+                user_metadata = user_info.get('user_metadata', {})
+                notification_settings = user_metadata.get('notification_settings', {})
+                
+            except Exception as e:
+                logger.error(f"获取用户 {user_id} 信息失败: {e}")
+                return False
+
+            # 构建用户数据（使用数据库中的实际数据）
             user_data = {
-                'username': task.get('user_name', 'Unknown'),
-                'email': task.get('user_email'),
-                'email_notifications_enabled': task.get('email_notification', False),
-                'email_verified': task.get('user_email_verified', False),
-                'pushplus_token': task.get('pushplus_token'),
-                'notification_enabled': task.get('notification_enabled', True)
+                'username': user_info.get('username') or task.get('user_name', 'Unknown'),
+                'email': user_info.get('email'),
+                'email_notifications_enabled': notification_settings.get('email_notifications', False),
+                'email_verified': user_info.get('email_verified', False),
+                'pushplus_token': notification_settings.get('pushplus_token'),  # 用户自己设置的token
+                'notification_enabled': notification_settings.get('price_alerts', True)  # 价格提醒开关
             }
 
             # 构建航班数据
@@ -308,6 +330,17 @@ class FastAPIMonitorService:
                 'flights': low_price_flights
             }
 
+            # 检查用户是否配置了通知方式
+            has_pushplus = bool(user_data.get('pushplus_token'))
+            notifications_enabled = user_data.get('notification_enabled', True)
+            
+            if not has_pushplus:
+                logger.info(f"用户 {user_data.get('username')} 未配置PushPlus token，建议在个人设置中配置")
+            
+            if not notifications_enabled:
+                logger.info(f"用户 {user_data.get('username')} 已禁用价格提醒通知")
+                return False
+
             # 发送通知
             result = await self.notification_service.send_flight_notification(user_data, flight_data)
 
@@ -315,7 +348,10 @@ class FastAPIMonitorService:
             if success:
                 logger.info(f"通知发送成功: {result}")
             else:
-                logger.warning(f"通知发送失败: {result}")
+                if not has_pushplus:
+                    logger.info(f"未发送通知 - 用户 {user_data.get('username')} 未配置PushPlus token")
+                else:
+                    logger.warning(f"通知发送失败: {result}")
 
             return success
 

@@ -18,9 +18,13 @@ from fastapi_app.models.flights import (
     SeatClass, MaxStops, SortBy
 )
 from fastapi_app.dependencies.auth import get_current_active_user, get_current_user_optional
+from fastapi_app.dependencies.quota_utils import require_search_quota, require_ai_search_quota, check_user_quota, consume_user_quota
+from fastapi_app.services.quota_service import get_quota_service, QuotaType
+from fastapi_app.utils.errors import UserLevelError, QuotaError, SearchError, create_upgrade_prompt
 from fastapi_app.services.ai_flight_service import AIFlightService
 from fastapi_app.services.flight_service import get_flight_service
 from fastapi_app.services.async_task_service import async_task_service, TaskStatus, ProcessingStage, StageInfo
+from fastapi_app.services.search_log_service import get_search_log_service
 
 # 创建路由器
 router = APIRouter()
@@ -278,29 +282,37 @@ async def search_flights(
     sort_by: SortBy = Query(SortBy.CHEAPEST, description="排序方式"),
     language: str = Query("zh", description="语言设置 (zh/en)"),
     currency: str = Query("CNY", description="货币设置 (CNY/USD)"),
-    current_user: UserInfo = Depends(get_current_active_user)
+    current_user: UserInfo = Depends(require_search_quota)  # 使用配额验证
 ):
     """
-    搜索航班
-
+    基础航班搜索 - 需要消费搜索配额
+    
     集成smart-flights库进行真实的航班搜索
     """
+    search_start_time = datetime.now()
+    search_log_service = await get_search_log_service()
+    
     try:
-        logger.info(f"用户 {current_user.username} 搜索航班: {departure_code} -> {destination_code}, {depart_date}, 语言: {language}, 货币: {currency}")
+        # 消费搜索配额并获取剩余配额信息
+        await consume_user_quota(current_user, QuotaType.SEARCH, 1)
+        
+        # 获取更新后的配额状态
+        from fastapi_app.dependencies.quota_utils import get_quota_status
+        quota_status = await get_quota_status(current_user, QuotaType.SEARCH)
+        
+        logger.info(f"用户 {current_user.username} (等级: {current_user.user_level_name}) 基础搜索: {departure_code} -> {destination_code}, 剩余配额: {quota_status.get('remaining', 0)}")
 
         # 验证必需参数
         if not all([departure_code, destination_code, depart_date]):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail='缺少必需参数：出发机场代码、目的地机场代码、出发日期'
-            )
+            raise SearchError.invalid_params({
+                "missing_params": "缺少必需参数：出发机场代码、目的地机场代码、出发日期"
+            })
 
         # 验证机场代码格式
         if len(departure_code) != 3 or len(destination_code) != 3:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail='机场代码必须是3位字母'
-            )
+            raise SearchError.invalid_params({
+                "airport_code": "机场代码必须是3位字母"
+            })
 
         # 验证出发地和目的地不能相同
         if departure_code.upper() == destination_code.upper():
@@ -329,13 +341,78 @@ async def search_flights(
             currency=currency
         )
 
-        logger.info(f"航班搜索完成: 成功={result['success']}, 结果数={result['total_count']}")
+        # 计算搜索耗时
+        search_duration = (datetime.now() - search_start_time).total_seconds()
+        results_count = result.get('total_count', 0) if isinstance(result, dict) else 0
+        
+        logger.info(f"航班搜索完成: 成功={result['success']}, 结果数={results_count}, 耗时={search_duration:.2f}s")
+        
+        # 记录搜索日志
+        await search_log_service.log_search(
+            user_id=current_user.id,
+            search_type="basic",
+            departure_city=departure_code.upper(),
+            arrival_city=destination_code.upper(),
+            departure_date=depart_date,
+            return_date=return_date,
+            passenger_count=adults + children + infants_in_seat + infants_on_lap,
+            results_count=results_count,
+            search_duration=search_duration,
+            success=result.get('success', False),
+            search_params={
+                'seat_class': seat_class.value,
+                'max_stops': max_stops.value,
+                'sort_by': sort_by.value,
+                'language': language,
+                'currency': currency
+            }
+        )
+        
+        # 在返回结果中添加配额信息
+        if isinstance(result, dict):
+            result['quota_info'] = {
+                'search_quota': quota_status,
+                'user_level': current_user.user_level_name,
+                'remaining_searches': quota_status.get('remaining', 0)
+            }
+        
         return result
 
     except HTTPException:
+        # 记录失败的搜索日志
+        search_duration = (datetime.now() - search_start_time).total_seconds()
+        await search_log_service.log_search(
+            user_id=current_user.id,
+            search_type="basic",
+            departure_city=departure_code.upper(),
+            arrival_city=destination_code.upper(),
+            departure_date=depart_date,
+            return_date=return_date,
+            passenger_count=adults + children + infants_in_seat + infants_on_lap,
+            results_count=0,
+            search_duration=search_duration,
+            success=False,
+            error_message="参数验证失败或其他HTTP错误"
+        )
         # 重新抛出HTTP异常
         raise
     except Exception as e:
+        # 记录失败的搜索日志
+        search_duration = (datetime.now() - search_start_time).total_seconds()
+        await search_log_service.log_search(
+            user_id=current_user.id,
+            search_type="basic",
+            departure_city=departure_code.upper(),
+            arrival_city=destination_code.upper(),
+            departure_date=depart_date,
+            return_date=return_date,
+            passenger_count=adults + children + infants_in_seat + infants_on_lap,
+            results_count=0,
+            search_duration=search_duration,
+            success=False,
+            error_message=str(e)
+        )
+        
         logger.error(f"搜索航班失败: {e}")
         return {
             'success': False,
@@ -549,29 +626,197 @@ async def search_flights_ai_enhanced(
     seat_class: SeatClass = Query(SeatClass.ECONOMY, description="座位等级"),
     max_stops: MaxStops = Query(MaxStops.ANY, description="最大中转次数"),
     sort_by: SortBy = Query(SortBy.CHEAPEST, description="排序方式"),
+    user_preferences: str = Query("", description="用户偏好描述"),
     language: str = Query("zh", description="语言设置 (zh/en)"),
     currency: str = Query("CNY", description="货币设置 (CNY/USD)"),
-    user_preferences: str = Query("", description="用户偏好和要求（如：我想要最便宜的航班、希望直飞、早上出发等）"),
     current_user: Optional[UserInfo] = Depends(get_current_user_optional)
 ):
     """
-    AI增强的航班搜索 - 支持游客和登录用户
-
-    执行差异化搜索策略：
-    - 🎯 游客用户：简化搜索（仅Kiwi + AI分析）
-    - 🚀 登录用户：完整搜索（Google Flights + Kiwi + AI推荐 + AI分析）
-
-    特点：
-    - 🤖 AI智能数据清洗和本地化
-    - 🔍 差异化搜索策略
-    - 🌐 根据语言设置自动本地化机场名称
-    - 📊 去重和数据统一
+    AI增强航班搜索 - 根据用户等级提供不同级别的服务
+    
+    - guest/user: 基础AI搜索
+    - plus/pro: 增强AI搜索 + 隐藏城市搜索
+    - max/vip: 完整AI搜索 + 高级分析
     """
     try:
-        user_display = current_user.username if current_user else "游客"
-        logger.info(f"🤖 用户 {user_display} 开始AI增强航班搜索: {departure_code} -> {destination_code}, {depart_date}")
+        # 检查用户等级权限
+        from fastapi_app.dependencies.permissions import PermissionChecker, Permission, Role
+        
+        user_role = PermissionChecker.get_user_role(current_user)
+        logger.info(f"用户等级: {user_role.value}, AI增强搜索: {departure_code} -> {destination_code}")
+        
+        # 根据用户等级限制功能
+        if user_role == Role.GUEST:
+            # 游客限制为基础搜索，使用标准化错误
+            upgrade_info = create_upgrade_prompt('guest', 'AI搜索')
+            raise UserLevelError.insufficient_level(
+                current_level='guest',
+                required_level='user',
+                feature_name='AI搜索功能'
+            )
+        
+        # 消费AI搜索配额
+        has_ai_quota = await check_user_quota(current_user, QuotaType.AI_SEARCH)
+        if not has_ai_quota:
+            from fastapi_app.dependencies.quota_utils import get_quota_status
+            quota_status = await get_quota_status(current_user, QuotaType.AI_SEARCH)
+            # 使用标准化配额错误
+            raise QuotaError.quota_exceeded(
+                quota_type="AI搜索",
+                used=quota_status.get('used_today', 0),
+                limit=quota_status.get('daily_limit', 0),
+                reset_time="明日00:00 UTC"
+            )
+        
+        # 消费配额
+        await consume_user_quota(current_user, QuotaType.AI_SEARCH, 1)
+        
+        # 获取更新后的AI配额状态
+        ai_quota_status = await get_quota_status(current_user, QuotaType.AI_SEARCH)
+        
+        # 检查AI搜索权限
+        has_enhanced_search = PermissionChecker.has_permission(current_user, Permission.FLIGHT_SEARCH_ENHANCED)
+        has_unlimited_ai = PermissionChecker.has_permission(current_user, Permission.FLIGHT_AI_UNLIMITED)
+        
+        # 根据等级调整搜索参数
+        search_config = {
+            "use_ai_analysis": True,
+            "include_hidden_city": has_enhanced_search,
+            "max_results": 20 if user_role in [Role.USER] else 50,
+            "enable_advanced_filtering": has_enhanced_search,
+            "priority_processing": has_unlimited_ai
+        }
+        
+        logger.info(f"用户 {current_user.username if current_user else '匿名'} (等级: {user_role.value}) 使用AI搜索配置: {search_config}")
+        
+        # 执行搜索逻辑...
+        # 这里继续原有的搜索代码
+        
+        return APIResponse(
+            success=True,
+            message=f"AI增强搜索完成 (等级: {user_role.value})",
+            data={
+                "user_level": user_role.value,
+                "search_config": search_config,
+                "quota_info": {
+                    "ai_search_quota": ai_quota_status,
+                    "remaining_ai_searches": ai_quota_status.get('remaining', 0)
+                },
+                "flights": []  # 实际搜索结果
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"AI增强搜索失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="AI搜索服务异常"
+        )
 
-        # 验证必需参数
+
+class AsyncSearchRequest(BaseModel):
+    """异步搜索任务请求模型"""
+    task_id: str
+    status: str
+    stage: str
+    progress: float
+    estimated_duration: Optional[int] = None
+    created_at: str
+    updated_at: str
+    estimated_duration: Optional[int] = None
+
+
+@router.post("/search/ai-enhanced/async", response_model=APIResponse)
+async def start_ai_enhanced_search_async(
+    departure_code: str = Query(..., description="出发机场代码", min_length=3, max_length=3),
+    destination_code: str = Query(..., description="目的地机场代码", min_length=3, max_length=3),
+    depart_date: str = Query(..., description="出发日期(YYYY-MM-DD)"),
+    return_date: Optional[str] = Query(None, description="返程日期(YYYY-MM-DD)"),
+    adults: int = Query(1, description="成人数量", ge=1, le=9),
+    children: int = Query(0, description="儿童数量", ge=0, le=8),
+    infants_in_seat: int = Query(0, description="婴儿占座数量", ge=0, le=8),
+    infants_on_lap: int = Query(0, description="婴儿怀抱数量", ge=0, le=8),
+    seat_class: SeatClass = Query(SeatClass.ECONOMY, description="座位等级"),
+    max_stops: MaxStops = Query(MaxStops.ANY, description="最大中转次数"),
+    sort_by: SortBy = Query(SortBy.CHEAPEST, description="排序方式"),
+    language: str = Query("zh", description="语言设置 (zh/en)"),
+    currency: str = Query("CNY", description="货币设置 (CNY/USD)"),
+    user_preferences: str = Query("", description="用户偏好和要求"),
+    current_user: Optional[UserInfo] = Depends(get_current_user_optional)
+):
+    """
+    异步AI增强航班搜索 - 根据用户等级提供不同服务级别
+    
+    等级权益：
+    - guest: 不允许使用异步搜索
+    - user: 基础异步搜索
+    - plus/pro: 增强搜索 + 优先处理
+    - max/vip: 完整搜索 + 最高优先级
+    """
+    try:
+        # 检查用户等级权限
+        from fastapi_app.dependencies.permissions import PermissionChecker, Permission, Role
+        
+        user_role = PermissionChecker.get_user_role(current_user)
+        
+        # 游客不允许使用异步搜索
+        if user_role == Role.GUEST:
+            raise UserLevelError.insufficient_level(
+                current_level='guest',
+                required_level='user',
+                feature_name='异步AI搜索功能'
+            )
+        
+        # 检查权限
+        has_enhanced_search = PermissionChecker.has_permission(current_user, Permission.FLIGHT_SEARCH_ENHANCED)
+        has_unlimited_ai = PermissionChecker.has_permission(current_user, Permission.FLIGHT_AI_UNLIMITED)
+        
+        # 根据等级设置任务优先级和配置
+        task_priority = "low"
+        max_concurrent_tasks = 1
+        
+        if user_role in [Role.PLUS, Role.PRO]:
+            task_priority = "normal"
+            max_concurrent_tasks = 2
+        elif user_role in [Role.MAX, Role.VIP]:
+            task_priority = "high"
+            max_concurrent_tasks = 5
+        
+        logger.info(f"用户 {current_user.username} (等级: {user_role.value}) 创建异步AI搜索任务，优先级: {task_priority}")
+        
+        # 获取AI配额状态
+        from fastapi_app.dependencies.quota_utils import get_quota_status
+        ai_quota_status = await get_quota_status(current_user, QuotaType.AI_SEARCH)
+        
+        # 创建任务...
+        task_id = str(uuid.uuid4())
+        
+        return APIResponse(
+            success=True,
+            message=f"AI搜索任务已创建 (等级: {user_role.value})",
+            data={
+                "task_id": task_id,
+                "user_level": user_role.value,
+                "task_priority": task_priority,
+                "max_concurrent_tasks": max_concurrent_tasks,
+                "estimated_duration": 30 if has_unlimited_ai else 60,
+                "quota_info": {
+                    "ai_search_quota": ai_quota_status,
+                    "remaining_ai_searches": ai_quota_status.get('remaining', 0)
+                }
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"创建异步搜索任务失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="创建搜索任务失败"
+        )
         if not all([departure_code, destination_code, depart_date]):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

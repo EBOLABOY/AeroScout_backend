@@ -20,8 +20,8 @@ class FastAPINotificationService:
         """初始化通知服务"""
         # PushPlus配置
         self.pushplus_url = "http://www.pushplus.plus/send"
-        self.website_domain = "ticketradar.izlx.me"
-        self.website_url = f"http://{self.website_domain}"
+        self.website_domain = "ticketradar.izlx.de"
+        self.website_url = f"https://{self.website_domain}"
         
         # 邮件配置
         self.smtp_server = os.getenv("MAIL_SERVER", "smtp.gmail.com")
@@ -56,6 +56,11 @@ class FastAPINotificationService:
             bool: 推送是否成功
         """
         try:
+            # 验证token是否存在
+            if not token or token.strip() == "":
+                logger.warning("PushPlus token为空，跳过PushPlus通知")
+                return False
+            
             data = {
                 "token": token,
                 "title": title,
@@ -70,7 +75,8 @@ class FastAPINotificationService:
             else:
                 logger.info("使用个人推送")
             
-            async with aiohttp.ClientSession() as session:
+            timeout = aiohttp.ClientTimeout(total=30)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(self.pushplus_url, json=data) as response:
                     response.raise_for_status()
                     result = await response.json()
@@ -85,6 +91,9 @@ class FastAPINotificationService:
                         logger.error(f"PushPlus推送失败: {result.get('msg')}")
                         return False
                         
+        except aiohttp.ClientTimeout:
+            logger.error("PushPlus推送超时")
+            return False
         except Exception as e:
             logger.error(f"PushPlus推送出错: {e}")
             return False
@@ -109,6 +118,15 @@ class FastAPINotificationService:
             bool: 发送是否成功
         """
         try:
+            # 验证邮件配置是否完整
+            if not all([self.username, self.password, self.default_sender]):
+                logger.warning("邮件配置不完整，跳过邮件通知。需要配置 MAIL_USERNAME, MAIL_PASSWORD, MAIL_DEFAULT_SENDER")
+                return False
+                
+            if not to_email or "@" not in to_email:
+                logger.warning(f"收件人邮箱格式无效: {to_email}")
+                return False
+            
             # 在线程池中执行同步的邮件发送操作
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(
@@ -148,20 +166,34 @@ class FastAPINotificationService:
             msg.attach(html_part)
             
             # 连接SMTP服务器并发送邮件
-            if self.use_ssl:
-                server = smtplib.SMTP_SSL(self.smtp_server, self.smtp_port)
-            else:
-                server = smtplib.SMTP(self.smtp_server, self.smtp_port)
-                if self.use_tls:
-                    server.starttls()
+            server = None
+            try:
+                if self.use_ssl:
+                    server = smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, timeout=30)
+                else:
+                    server = smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=30)
+                    if self.use_tls:
+                        server.starttls()
+                
+                server.login(self.username, self.password)
+                server.send_message(msg)
+                
+                logger.info(f"邮件发送成功: {to_email} - {subject}")
+                return True
+                
+            finally:
+                if server:
+                    server.quit()
             
-            server.login(self.username, self.password)
-            server.send_message(msg)
-            server.quit()
-            
-            logger.info(f"邮件发送成功: {to_email} - {subject}")
-            return True
-            
+        except smtplib.SMTPAuthenticationError as e:
+            logger.error(f"SMTP认证失败: {e}")
+            return False
+        except smtplib.SMTPRecipientsRefused as e:
+            logger.error(f"收件人地址被拒绝: {e}")
+            return False
+        except smtplib.SMTPException as e:
+            logger.error(f"SMTP错误: {e}")
+            return False
         except Exception as e:
             logger.error(f"邮件发送失败: {e}")
             return False
@@ -184,6 +216,7 @@ class FastAPINotificationService:
         results = {
             'pushplus': False,
             'email': False,
+            'supabase_email': False,
             'total_sent': 0
         }
 
@@ -193,7 +226,7 @@ class FastAPINotificationService:
             flights = flight_data.get('flights', [])
             title = f"[Ticketradar] {route} - 发现 {len(flights)} 个低价机票"
 
-            # PushPlus推送
+            # PushPlus推送（如果用户设置了token）
             pushplus_token = user_data.get('pushplus_token')
             notification_enabled = user_data.get('notification_enabled', True)
             
@@ -209,26 +242,23 @@ class FastAPINotificationService:
                 if pushplus_success:
                     results['total_sent'] += 1
 
-            # 邮件推送
+            # Supabase邮件通知（如果启用）
+            # 注意：Supabase邮件主要用于认证相关的邮件
+            # 对于价格提醒这类通知，我们仍然可以使用PushPlus或其他通知方式
+            
+            # 如果用户启用了邮件通知且有有效邮箱，可以考虑发送Supabase邮件
             email_notifications_enabled = user_data.get('email_notifications_enabled', False)
-            email_verified = user_data.get('email_verified', False)
             user_email = user_data.get('email')
             
-            if email_notifications_enabled and email_verified and user_email:
-                # 生成邮件内容
-                subject = f"【Ticketradar】发现低价航班 - {route}"
-                html_content = self._generate_flight_email_html(subject, flight_data)
-                text_content = self._generate_flight_email_text(flight_data)
-                
-                email_success = await self.send_email_notification(
-                    user_email, subject, html_content, text_content
-                )
-                results['email'] = email_success
-                if email_success:
-                    results['total_sent'] += 1
+            # 由于Supabase邮件主要用于认证，这里我们跳过邮件通知
+            # 实际的价格提醒建议使用PushPlus、短信或其他即时通知方式
+            if email_notifications_enabled and user_email:
+                logger.info(f"用户 {user_data.get('username', 'Unknown')} 启用了邮件通知，但价格提醒建议使用PushPlus等即时通知方式")
+                results['email'] = False  # 不发送SMTP邮件
+                results['supabase_email'] = False  # 不发送Supabase邮件
 
             username = user_data.get('username', 'Unknown')
-            logger.info(f"用户 {username} 通知发送完成: PushPlus={results['pushplus']}, Email={results['email']}")
+            logger.info(f"用户 {username} 通知发送完成: PushPlus={results['pushplus']}, Email={results['email']}, Supabase={results['supabase_email']}")
 
         except Exception as e:
             logger.error(f"发送航班通知失败: {e}")

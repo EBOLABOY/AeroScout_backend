@@ -95,8 +95,12 @@ class CacheService:
 
     def _deserialize_value(self, value: str, value_type: type = None) -> Any:
         """反序列化值"""
-        if not value:
+        if value is None:
             return None
+            
+        # 处理空字符串的情况
+        if value == "":
+            return "" if value_type == str else None
             
         try:
             if value_type == dict or value_type == list:
@@ -113,8 +117,12 @@ class CacheService:
                 # 尝试自动检测JSON
                 if value.startswith(('{', '[')):
                     return json.loads(value)
+                # 尝试转换为数字
+                if value.isdigit():
+                    return int(value)
                 return value
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning(f"反序列化失败 {value}: {e}")
             return value
     
     async def get(self, key: str, value_type: type = None) -> Any:

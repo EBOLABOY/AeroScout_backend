@@ -146,12 +146,12 @@ def create_fastapi_app() -> FastAPI:
     # 注册路由
     from fastapi_app.routers import auth, flights, monitor, admin
 
-    app.include_router(auth.router, prefix="/auth", tags=["认证"])
+    app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
     app.include_router(monitor.router, prefix="/api/monitor", tags=["监控"])
     app.include_router(flights.router, prefix="/api/flights", tags=["航班"])
     app.include_router(admin.router, prefix="/api/admin", tags=["管理员"])
 
-    # 兼容性路由已移除 - 统一使用 /api/flights 前缀
+    # 所有API统一使用 /api 前缀
     
     # 根路径
     @app.get("/")

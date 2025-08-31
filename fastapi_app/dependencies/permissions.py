@@ -8,7 +8,6 @@ from fastapi import Depends, HTTPException, status
 from loguru import logger
 
 from fastapi_app.models.auth import UserInfo
-from fastapi_app.dependencies.auth import get_current_active_user
 
 
 class Permission(Enum):
@@ -25,75 +24,110 @@ class Permission(Enum):
     
     # 航班搜索权限
     FLIGHT_SEARCH = "flight:search"
+    FLIGHT_SEARCH_ENHANCED = "flight:search:enhanced"  # 增强搜索
     FLIGHT_MONITOR = "flight:monitor"
-    
-    # 系统管理权限
-    SYSTEM_ADMIN = "system:admin"
-    SYSTEM_CONFIG = "system:config"
-    SYSTEM_LOGS = "system:logs"
+    FLIGHT_AI_UNLIMITED = "flight:ai:unlimited"  # 无限AI搜索
     
     # 数据管理权限
     DATA_EXPORT = "data:export"
     DATA_IMPORT = "data:import"
     DATA_BACKUP = "data:backup"
+    
+    # VIP特权
+    PRIORITY_SUPPORT = "priority:support"
+    ADVANCED_ANALYTICS = "advanced:analytics"
+    
+    # 系统管理权限
+    SYSTEM_ADMIN = "system:admin"
+    SYSTEM_CONFIG = "system:config"
+    SYSTEM_LOGS = "system:logs"
 
 
 class Role(Enum):
-    """角色枚举"""
-    GUEST = "guest"          # 游客（未登录）
-    USER = "user"            # 普通用户
-    VIP = "vip"              # VIP用户
-    ADMIN = "admin"          # 管理员
-    SUPER_ADMIN = "super_admin"  # 超级管理员
+    """角色枚举 - 基于数据库中的用户等级"""
+    GUEST = "guest"          # 游客（未登录用户）
+    USER = "user"            # 普通用户（注册用户）
+    PLUS = "plus"            # PLUS会员（中度订阅用户）
+    PRO = "pro"              # PRO会员（高度订阅用户）
+    MAX = "max"              # MAX会员（最高订阅用户）
+    VIP = "vip"              # 铂金旅客（高活跃用户）
+    ADMIN = "admin"          # 系统管理员（超级权限）
 
 
 # 角色权限映射
 ROLE_PERMISSIONS = {
     Role.GUEST: [
-        # 游客只能查看基本信息
+        # 游客仅可基础搜索
+        Permission.FLIGHT_SEARCH,
     ],
     Role.USER: [
+        # 普通用户基础功能
+        Permission.FLIGHT_SEARCH,
         Permission.TRAVEL_PLAN_CREATE,
         Permission.TRAVEL_PLAN_READ,
-        Permission.FLIGHT_SEARCH,
     ],
-    Role.VIP: [
+    Role.PLUS: [
+        # PLUS会员增强功能
+        Permission.FLIGHT_SEARCH,
+        Permission.FLIGHT_SEARCH_ENHANCED,
+        Permission.FLIGHT_MONITOR,
         Permission.TRAVEL_PLAN_CREATE,
         Permission.TRAVEL_PLAN_READ,
-        Permission.TRAVEL_PLAN_UNLIMITED,
-        Permission.FLIGHT_SEARCH,
-        Permission.FLIGHT_MONITOR,
         Permission.DATA_EXPORT,
     ],
-    Role.ADMIN: [
-        Permission.USER_READ,
-        Permission.USER_WRITE,
+    Role.PRO: [
+        # PRO会员专业功能
+        Permission.FLIGHT_SEARCH,
+        Permission.FLIGHT_SEARCH_ENHANCED,
+        Permission.FLIGHT_MONITOR,
         Permission.TRAVEL_PLAN_CREATE,
         Permission.TRAVEL_PLAN_READ,
         Permission.TRAVEL_PLAN_UNLIMITED,
+        Permission.DATA_EXPORT,
+        Permission.ADVANCED_ANALYTICS,
+    ],
+    Role.MAX: [
+        # MAX会员顶级功能
         Permission.FLIGHT_SEARCH,
+        Permission.FLIGHT_SEARCH_ENHANCED,
         Permission.FLIGHT_MONITOR,
-        Permission.SYSTEM_CONFIG,
-        Permission.SYSTEM_LOGS,
+        Permission.FLIGHT_AI_UNLIMITED,
+        Permission.TRAVEL_PLAN_UNLIMITED,
         Permission.DATA_EXPORT,
         Permission.DATA_IMPORT,
+        Permission.ADVANCED_ANALYTICS,
     ],
-    Role.SUPER_ADMIN: [
-        # 超级管理员拥有所有权限
+    Role.VIP: [
+        # VIP铂金旅客特权
+        Permission.FLIGHT_SEARCH,
+        Permission.FLIGHT_SEARCH_ENHANCED,
+        Permission.FLIGHT_MONITOR,
+        Permission.FLIGHT_AI_UNLIMITED,
+        Permission.TRAVEL_PLAN_UNLIMITED,
+        Permission.DATA_EXPORT,
+        Permission.PRIORITY_SUPPORT,
+        Permission.ADVANCED_ANALYTICS,
+    ],
+    Role.ADMIN: [
+        # 管理员拥有所有权限
         Permission.USER_READ,
         Permission.USER_WRITE,
         Permission.USER_DELETE,
+        Permission.FLIGHT_SEARCH,
+        Permission.FLIGHT_SEARCH_ENHANCED,
+        Permission.FLIGHT_MONITOR,
+        Permission.FLIGHT_AI_UNLIMITED,
         Permission.TRAVEL_PLAN_CREATE,
         Permission.TRAVEL_PLAN_READ,
         Permission.TRAVEL_PLAN_UNLIMITED,
-        Permission.FLIGHT_SEARCH,
-        Permission.FLIGHT_MONITOR,
-        Permission.SYSTEM_ADMIN,
-        Permission.SYSTEM_CONFIG,
-        Permission.SYSTEM_LOGS,
         Permission.DATA_EXPORT,
         Permission.DATA_IMPORT,
         Permission.DATA_BACKUP,
+        Permission.PRIORITY_SUPPORT,
+        Permission.ADVANCED_ANALYTICS,
+        Permission.SYSTEM_ADMIN,
+        Permission.SYSTEM_CONFIG,
+        Permission.SYSTEM_LOGS,
     ]
 }
 
@@ -103,17 +137,22 @@ class PermissionChecker:
     
     @staticmethod
     def get_user_role(user: Optional[UserInfo]) -> Role:
-        """获取用户角色"""
+        """获取用户角色 - 基于数据库中的用户等级"""
         if not user:
             return Role.GUEST
 
+        # 管理员用户直接返回ADMIN角色
         if user.is_admin:
-            # 将所有管理员视为超级管理员，拥有完整的系统管理权限
-            return Role.SUPER_ADMIN
-
-        # 这里可以根据用户的其他属性判断是否为VIP
-        # 目前简单地将所有普通用户视为USER
-        return Role.USER
+            return Role.ADMIN
+            
+        # 基于数据库中的user_level_name确定角色
+        level_name = user.user_level_name or "user"
+        try:
+            return Role(level_name)
+        except ValueError:
+            # 如果等级名称无效，默认为普通用户
+            logger.warning(f"未知的用户等级名称: {level_name}，默认为user")
+            return Role.USER
     
     @staticmethod
     def get_user_permissions(user: Optional[UserInfo]) -> List[Permission]:
@@ -144,9 +183,19 @@ def require_permission(permission: Permission) -> Callable:
     """
     依赖注入函数生成器，用于要求特定权限
     """
-    async def _require_permission(current_user: UserInfo = Depends(get_current_active_user)) -> UserInfo:
+    async def _require_permission(current_user: UserInfo = None) -> UserInfo:
+        # 延迟导入避免循环依赖
+        if current_user is None:
+            from fastapi_app.dependencies.auth import get_current_active_user
+            # 这里需要手动获取当前用户，但这样会破坏依赖注入
+            # 更好的方法是在路由层面处理权限检查
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="需要认证"
+            )
+        
         if not PermissionChecker.has_permission(current_user, permission):
-            logger.warning(f"用户 {current_user.username} 缺少权限: {permission.value}")
+            logger.warning(f"用户 {current_user.username if current_user else '匿名'} 缺少权限: {permission.value}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"缺少权限: {permission.value}"
@@ -165,7 +214,7 @@ require_system_admin_permission = require_permission(Permission.SYSTEM_ADMIN)
 
 
 # 权限信息获取函数
-async def get_user_permissions_info(current_user: UserInfo = Depends(get_current_active_user)) -> dict:
+async def get_user_permissions_info(current_user: UserInfo) -> dict:
     """获取用户权限信息"""
     role = PermissionChecker.get_user_role(current_user)
     permissions = PermissionChecker.get_user_permissions(current_user)
@@ -177,3 +226,9 @@ async def get_user_permissions_info(current_user: UserInfo = Depends(get_current
         "permissions": [perm.value for perm in permissions],
         "is_admin": current_user.is_admin
     }
+
+
+# 权限检查辅助函数
+def check_permission(user: UserInfo, permission: Permission) -> bool:
+    """检查用户是否有指定权限"""
+    return PermissionChecker.has_permission(user, permission)

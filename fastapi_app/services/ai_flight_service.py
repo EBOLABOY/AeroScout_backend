@@ -1690,7 +1690,10 @@ You must strictly follow this key principle: The most successful Skiplagging opp
 
                 return flight_dict
 
-            # 如果有dict方法，尝试使用
+            # 如果有model_dump方法，优先使用（Pydantic V2）
+            elif hasattr(flight, 'model_dump'):
+                return flight.model_dump()
+            # 如果有dict方法，尝试使用（向后兼容）
             elif hasattr(flight, 'dict'):
                 return flight.dict()
 

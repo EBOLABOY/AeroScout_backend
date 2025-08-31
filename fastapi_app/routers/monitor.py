@@ -133,7 +133,7 @@ async def get_monitor_tasks(
     monitor_service: FastAPIMonitorService = Depends(get_monitor_service)
 ):
     """
-    获取用户的监控任务列表
+    获取用户的监控任务列表 - Supabase认证
     """
     try:
         logger.info(f"用户 {current_user.username} 查询监控任务列表")
@@ -165,7 +165,7 @@ async def create_monitor_task(
     current_user: UserInfo = Depends(get_current_active_user)
 ):
     """
-    创建监控任务
+    创建监控任务 - Supabase认证
     """
     try:
         logger.info(f"用户 {current_user.username} 创建监控任务: {task_data.name}")

@@ -89,3 +89,27 @@ test_data_backup/
 
 # 数据分析目录 - 包含航班搜索对比数据
 data_analysis/
+
+# Node.js
+node_modules/
+package.json
+package-lock.json
+*.lock
+
+# 数据库目录（已完成迁移，不需要版本控制）
+database/
+
+# 测试脚本
+test_*.py
+simple_*.py
+auto_*.py
+
+# 输出和日志文件
+*.output
+*.out
+
+# 邀请码相关文件（功能已停用）
+invite_codes/
+*invite*.py
+*invite*.sql
+*invite*.json

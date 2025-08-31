@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-FastAPI 应用配置设置
+FastAPI 应用配置设置 - 纯Supabase方案
 """
 
 import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# 加载Backend目录的环境变量文件
+# 加载环境变量文件
 backend_root = Path(__file__).parent.parent.parent
 env_path = backend_root / ".env"
 load_dotenv(env_path)
@@ -17,35 +17,30 @@ load_dotenv(env_path)
 DEBUG = os.getenv("DEBUG", "True").lower() == "true"
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here")
 
-# 数据库配置（本地 SQLite 作为后备）
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./ticketradar.db")
-
-# Supabase 配置
+# Supabase 配置（主数据库和认证）
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-SUPABASE_DATABASE_URL = os.getenv("SUPABASE_DATABASE_URL")
 
-# 使用 Supabase 作为主数据库
-USE_SUPABASE = bool(SUPABASE_URL and SUPABASE_ANON_KEY)
-if USE_SUPABASE:
-    DATABASE_URL = SUPABASE_DATABASE_URL or DATABASE_URL
-
-# JWT 配置
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", SECRET_KEY)
-JWT_ALGORITHM = "HS256"
-JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 30))
-
-# Redis 配置
+# Redis 缓存配置
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
-# AI 服务配置 - OpenAI 格式的第三方 Gemini API
+# AI 服务配置
 AI_API_KEY = os.getenv("AI_API_KEY")
 AI_API_URL = os.getenv("AI_API_URL", "http://154.19.184.12:3000/v1")
-AI_MODEL = os.getenv("AI_MODEL", "gemini-2.5-pro")
-
-# 登录用户专用AI模型配置
 AI_MODEL_AUTHENTICATED = os.getenv("AI_MODEL_AUTHENTICATED", "gemini-2.5-pro")
+
+# 数据保存配置（默认关闭）
+SAVE_FLIGHT_DATA = os.getenv("SAVE_FLIGHT_DATA", "false").lower() == "true"
+
+# 日志配置
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+# 通知服务配置
+NOTIFICATION_COOLDOWN = int(os.getenv("NOTIFICATION_COOLDOWN", 24))  # 小时
+
+# 网站配置（用于Supabase回调）
+SITE_URL = os.getenv("SITE_URL", "http://localhost:3000")
 
 # 测试数据保存配置
 ENABLE_TEST_DATA_SAVE = os.getenv("ENABLE_TEST_DATA_SAVE", "False").lower() == "true"
@@ -84,11 +79,11 @@ def validate_config():
     """验证配置"""
     errors = []
     
-    if USE_SUPABASE:
-        if not SUPABASE_URL:
-            errors.append("SUPABASE_URL is required when using Supabase")
-        if not SUPABASE_ANON_KEY:
-            errors.append("SUPABASE_ANON_KEY is required when using Supabase")
+    # Supabase 配置验证（必需）
+    if not SUPABASE_URL:
+        errors.append("SUPABASE_URL is required")
+    if not SUPABASE_ANON_KEY:
+        errors.append("SUPABASE_ANON_KEY is required")
     
     if not AI_API_KEY:
         errors.append("AI_API_KEY is required for AI services")
@@ -110,7 +105,7 @@ def get_config_summary():
         "app_version": APP_VERSION,
         "debug": DEBUG,
         "server": "uvicorn (configured via CLI)",
-        "database": "Supabase" if USE_SUPABASE else "SQLite",
+        "database": "Supabase",
         "ai_service": "Gemini (OpenAI API)" if AI_API_KEY else "None",
         "cache": "Redis" if REDIS_URL else "Memory",
 
@@ -128,28 +123,20 @@ class Settings:
 
 
 
-        # 数据库配置
-        self.DATABASE_URL = DATABASE_URL
-        self.USE_SUPABASE = USE_SUPABASE
+        # 数据库配置（Supabase）
         self.SUPABASE_URL = SUPABASE_URL
         self.SUPABASE_ANON_KEY = SUPABASE_ANON_KEY
         self.SUPABASE_SERVICE_ROLE_KEY = SUPABASE_SERVICE_ROLE_KEY
-        self.SUPABASE_DATABASE_URL = SUPABASE_DATABASE_URL
 
         # AI配置
         self.AI_API_KEY = AI_API_KEY
         self.AI_API_URL = AI_API_URL
-        self.AI_MODEL = AI_MODEL
         self.AI_MODEL_AUTHENTICATED = AI_MODEL_AUTHENTICATED
 
-        # 测试数据保存配置
+        # 数据保存配置
+        self.SAVE_FLIGHT_DATA = SAVE_FLIGHT_DATA
         self.ENABLE_TEST_DATA_SAVE = ENABLE_TEST_DATA_SAVE
         self.TEST_DATA_DIR = TEST_DATA_DIR
-
-        # JWT配置
-        self.JWT_SECRET_KEY = JWT_SECRET_KEY
-        self.JWT_ALGORITHM = JWT_ALGORITHM
-        self.JWT_ACCESS_TOKEN_EXPIRE_MINUTES = JWT_ACCESS_TOKEN_EXPIRE_MINUTES
 
         # CORS配置
         self.CORS_ORIGINS = CORS_ORIGINS
@@ -159,6 +146,10 @@ class Settings:
 
         # 信任的主机列表
         self.TRUSTED_HOSTS = TRUSTED_HOSTS  # 使用配置文件中的设置，而非硬编码
+    
+    def get_config_summary(self):
+        """获取配置摘要"""
+        return get_config_summary()
 
 # 创建全局settings实例
 settings = Settings()

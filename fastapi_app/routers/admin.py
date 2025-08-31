@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 管理员API路由
-提供系统管理、用户管理、邀请码管理等功能
+提供系统管理、用户管理等功能
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -15,47 +15,80 @@ from loguru import logger
 
 from ..models.auth import UserInfo
 from ..models.common import APIResponse
-from ..dependencies.permissions import require_system_admin_permission
-from ..services.user_service import FastAPIUserService, get_user_service
+from ..dependencies.permissions import check_permission, Permission
+from ..dependencies.auth import get_current_active_user
+from ..services.supabase_auth_service import SupabaseAuthService, get_supabase_auth_service
 from ..services.supabase_service import get_supabase_service
 from ..services.supabase_service import SupabaseService
 
 router = APIRouter()
+
+async def check_admin_permission(current_user: UserInfo) -> None:
+    """检查管理员权限"""
+    if not check_permission(current_user, Permission.SYSTEM_ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="缺少系统管理权限"
+        )
 
 # 系统启动时间
 START_TIME = time.time()
 
 @router.get("/stats", response_model=APIResponse)
 async def get_system_stats(
-    current_user: UserInfo = Depends(require_system_admin_permission),
-    user_service: FastAPIUserService = Depends(get_user_service)
+    current_user: UserInfo = Depends(get_current_active_user),
+    auth_service: SupabaseAuthService = Depends(get_supabase_auth_service)
 ):
     """
     获取系统统计信息
     """
     try:
+        # 检查管理员权限
+        await check_admin_permission(current_user)
+        
         # 获取用户统计
         supabase_service = await get_supabase_service()
-
+        
         # 使用 count 方法优化用户总数统计
-        total_users_result = supabase_service.client.table('users').select('id', count='exact').execute()
+        total_users_result = supabase_service.client.table('profiles').select('id', count='exact').execute()
         total_users = total_users_result.count if total_users_result.count is not None else 0
-
-        # 使用 count 方法优化活跃用户数统计
-        active_users_result = supabase_service.client.table('users').select('id', count='exact').eq('is_active', True).execute()
-        active_users = active_users_result.count if active_users_result.count is not None else 0
-
+        
+        # 使用 count 方法优化活跃用户数统计（最近30天登录的用户）
+        thirty_days_ago = (datetime.now() - timedelta(days=30)).isoformat()
+        try:
+            active_users_result = supabase_service.client.table('profiles').select('id', count='exact').filter('last_login', 'gte', thirty_days_ago).execute()
+            active_users = active_users_result.count if active_users_result.count is not None else 0
+        except Exception:
+            # 如果查询失败，使用is_active字段作为备选
+            active_users_result = supabase_service.client.table('profiles').select('id', count='exact').eq('is_active', True).execute()
+            active_users = active_users_result.count if active_users_result.count is not None else 0
+        
         # 获取监控任务统计
-        total_tasks_result = supabase_service.client.table('monitor_tasks').select('id', count='exact').execute()
-        total_tasks = total_tasks_result.count if total_tasks_result.count is not None else 0
+        try:
+            total_tasks_result = supabase_service.client.table('monitor_tasks').select('id', count='exact').execute()
+            total_tasks = total_tasks_result.count if total_tasks_result.count is not None else 0
 
-        active_tasks_result = supabase_service.client.table('monitor_tasks').select('id', count='exact').eq('is_active', True).execute()
-        active_tasks = active_tasks_result.count if active_tasks_result.count is not None else 0
+            active_tasks_result = supabase_service.client.table('monitor_tasks').select('id', count='exact').eq('is_active', True).execute()
+            active_tasks = active_tasks_result.count if active_tasks_result.count is not None else 0
+        except Exception as e:
+            logger.warning(f"监控任务统计查询失败: {e}")
+            total_tasks = 0
+            active_tasks = 0
 
-        monitor_stats = {
-            'total_tasks': total_tasks,
-            'active_tasks': active_tasks
-        }
+        # 获取搜索次数统计
+        today = datetime.now().date().isoformat()
+        try:
+            # 尝试从搜索日志表获取今日搜索次数
+            today_searches_result = supabase_service.client.table('search_logs').select('id', count='exact').filter('created_at', 'gte', today).execute()
+            today_searches = today_searches_result.count if today_searches_result.count is not None else 0
+            
+            # 获取总搜索次数
+            total_searches_result = supabase_service.client.table('search_logs').select('id', count='exact').execute()
+            total_searches = total_searches_result.count if total_searches_result.count is not None else 0
+        except Exception as e:
+            logger.warning(f"搜索统计查询失败，可能搜索日志表不存在: {e}")
+            today_searches = 0
+            total_searches = 0
 
         # 获取系统资源使用情况
         memory_usage = psutil.virtual_memory().percent
@@ -77,10 +110,10 @@ async def get_system_stats(
         stats = {
             "totalUsers": total_users,
             "activeUsers": active_users,
-            "totalTasks": monitor_stats.get('total_tasks', 0),
-            "activeTasks": monitor_stats.get('active_tasks', 0),
-            "totalSearches": 0,
-            "todaySearches": 0,
+            "totalTasks": total_tasks,
+            "activeTasks": active_tasks,
+            "totalSearches": total_searches,
+            "todaySearches": today_searches,
             "systemHealth": system_health,
             "uptime": uptime_str,
             "memoryUsage": round(memory_usage, 1),
@@ -107,8 +140,8 @@ async def get_system_stats(
 async def user_action(
     user_id: str,
     action: str,
-    current_user: UserInfo = Depends(require_system_admin_permission),
-    user_service: FastAPIUserService = Depends(get_user_service)
+    current_user: UserInfo = Depends(get_current_active_user),
+    auth_service: SupabaseAuthService = Depends(get_supabase_auth_service)
 ):
     """
     用户操作（封禁、解封、删除等）
@@ -119,11 +152,11 @@ async def user_action(
 
         success = False
         if action == "block":
-            success = await user_service.block_user(user_id)
+            success = await auth_service.block_user(user_id)
         elif action == "unblock":
-            success = await user_service.unblock_user(user_id)
+            success = await auth_service.unblock_user(user_id)
         elif action == "delete":
-            success = await user_service.delete_user(user_id)
+            success = await auth_service.delete_user(user_id)
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持的操作")
 
@@ -137,16 +170,68 @@ async def user_action(
     except Exception as e:
         logger.error(f"用户操作失败: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="用户操作失败")
+@router.get("/users", response_model=APIResponse)
+async def get_users_list(
+    page: int = Query(1, ge=1, description="页码"),
+    limit: int = Query(20, ge=1, le=100, description="每页数量"),
+    current_user: UserInfo = Depends(get_current_active_user),
+    auth_service: SupabaseAuthService = Depends(get_supabase_auth_service)
+):
+    """
+    获取用户列表（管理员功能）
+    """
+    try:
+        # 检查管理员权限
+        await check_admin_permission(current_user)
+        
+        supabase_service = await get_supabase_service()
+        
+        # 计算偏移量
+        offset = (page - 1) * limit
+        
+        # 获取用户总数
+        total_result = supabase_service.client.table('profiles').select('id', count='exact').execute()
+        total = total_result.count if total_result.count is not None else 0
+        
+        # 获取用户列表
+        users_result = supabase_service.client.table('profiles').select(
+            'id, username, email, full_name, is_admin, user_level_name, is_active, created_at, last_login'
+        ).range(offset, offset + limit - 1).order('created_at', desc=True).execute()
+        
+        users = users_result.data if users_result.data else []
+        
+        return APIResponse(
+            success=True,
+            message="获取用户列表成功",
+            data={
+                "users": users,
+                "total": total,
+                "page": page,
+                "limit": limit,
+                "pages": (total + limit - 1) // limit
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取用户列表失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取用户列表失败"
+        )
+
+
 @router.get("/users/stats", response_model=APIResponse)
 async def get_user_stats(
-    current_user: UserInfo = Depends(require_system_admin_permission),
-    user_service: FastAPIUserService = Depends(get_user_service)
+    current_user: UserInfo = Depends(get_current_active_user),
+    auth_service: SupabaseAuthService = Depends(get_supabase_auth_service)
 ):
     """
     获取用户统计信息（管理员功能）
     """
     try:
-        stats = await user_service.get_user_stats()
+        stats = await auth_service.get_user_stats()
         return APIResponse(
             success=True,
             message="获取用户统计成功",
@@ -160,159 +245,9 @@ async def get_user_stats(
         )
 
 
-@router.get("/invite-codes", response_model=APIResponse)
-async def get_invite_codes(
-    current_user: UserInfo = Depends(require_system_admin_permission)
-):
-    """
-    获取邀请码列表
-    """
-    try:
-        supabase_service = await get_supabase_service()
-
-        # 检查邀请码表是否存在，如果不存在则返回空列表
-        try:
-            result = supabase_service.client.table('invite_codes').select('*').execute()
-            codes = result.data if result.data else []
-        except Exception:
-            # 表不存在，返回空列表
-            codes = []
-
-        return APIResponse(
-            success=True,
-            message="获取邀请码列表成功",
-            data={"codes": codes}
-        )
-
-    except Exception as e:
-        logger.error(f"获取邀请码列表失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="获取邀请码列表失败"
-        )
-
-
-@router.post("/invite-codes", response_model=APIResponse)
-async def create_invite_code(
-    code_data: Dict[str, Any],
-    current_user: UserInfo = Depends(require_system_admin_permission)
-):
-    """
-    创建邀请码
-    """
-    try:
-        supabase_service = await get_supabase_service()
-
-        # 生成邀请码（如果没有提供）
-        code = code_data.get('code')
-        if not code:
-            code = generate_invite_code()
-        else:
-            code = code.upper()  # 转换为大写
-
-        # 检查邀请码是否已存在
-        existing_code = supabase_service.client.table('invite_codes').select('*').eq('code', code).execute()
-        if existing_code.data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"邀请码 {code} 已存在，请使用其他邀请码"
-            )
-
-        # 处理过期时间
-        expires_at = code_data.get('expiresAt')
-        if expires_at:
-            try:
-                # 验证日期格式
-                datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
-            except ValueError:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="过期时间格式无效"
-                )
-
-        invite_code = {
-            'id': str(uuid.uuid4()),
-            'code': code,
-            'description': code_data.get('description', ''),
-            'max_uses': max(1, code_data.get('maxUses', 1)),  # 至少为1
-            'used_count': 0,
-            'expires_at': expires_at,
-            'is_active': True,
-            'created_by': current_user.id,
-            'created_at': datetime.utcnow().isoformat()
-        }
-
-        # 创建邀请码表（如果不存在）
-        try:
-            result = supabase_service.client.table('invite_codes').insert(invite_code).execute()
-        except Exception as e:
-            if "relation" in str(e) and "does not exist" in str(e):
-                # 表不存在，先创建表
-                logger.warning("邀请码表不存在，功能暂未实现")
-                raise HTTPException(
-                    status_code=status.HTTP_501_NOT_IMPLEMENTED,
-                    detail="邀请码功能暂未实现"
-                )
-            raise
-
-        return APIResponse(
-            success=True,
-            message="邀请码创建成功",
-            data={"code": invite_code}
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"创建邀请码失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="创建邀请码失败"
-        )
-
-
-def generate_invite_code(length: int = 8) -> str:
-    """
-    生成随机邀请码
-    """
-    import random
-    import string
-
-    # 使用大写字母和数字，排除容易混淆的字符
-    chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-    return ''.join(random.choice(chars) for _ in range(length))
-
-
-@router.delete("/invite-codes/{code_id}", response_model=APIResponse)
-async def delete_invite_code(
-    code_id: str,
-    current_user: UserInfo = Depends(require_system_admin_permission)
-):
-    """
-    删除邀请码
-    """
-    try:
-        supabase_service = await get_supabase_service()
-
-        result = supabase_service.client.table('invite_codes').delete().eq('id', code_id).execute()
-
-        return APIResponse(
-            success=True,
-            message="邀请码删除成功",
-            data={"code_id": code_id}
-        )
-
-    except Exception as e:
-        logger.error(f"删除邀请码失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="删除邀请码失败"
-        )
-
-
 @router.get("/monitor-settings", response_model=APIResponse)
 async def get_monitor_settings(
-    current_user: UserInfo = Depends(require_system_admin_permission)
+    current_user: UserInfo = Depends(get_current_active_user)
 ):
     """
     获取监控设置
@@ -347,7 +282,7 @@ async def get_monitor_settings(
 @router.put("/monitor-settings", response_model=APIResponse)
 async def update_monitor_settings(
     settings: Dict[str, Any],
-    current_user: UserInfo = Depends(require_system_admin_permission)
+    current_user: UserInfo = Depends(get_current_active_user)
 ):
     """
     更新监控设置
@@ -371,7 +306,7 @@ async def update_monitor_settings(
 
 @router.get("/monitor-status", response_model=APIResponse)
 async def get_monitor_status(
-    current_user: UserInfo = Depends(require_system_admin_permission)
+    current_user: UserInfo = Depends(get_current_active_user)
 ):
     """
     获取监控系统状态
@@ -383,16 +318,16 @@ async def get_monitor_status(
         supabase_service = await get_supabase_service()
 
         # 获取用户统计
-        total_users_result = supabase_service.client.table('users').select('id', count='exact').execute()
+        total_users_result = supabase_service.client.table('profiles').select('id', count='exact').execute()
         total_users = total_users_result.count if total_users_result.count is not None else 0
 
         # 获取管理员用户数量
-        admin_users_result = supabase_service.client.table('users').select('id', count='exact').eq('is_admin', True).execute()
+        admin_users_result = supabase_service.client.table('profiles').select('id', count='exact').eq('is_admin', True).execute()
         admin_users = admin_users_result.count if admin_users_result.count is not None else 0
 
         # 获取活跃用户（最近30天有登录记录的用户）
         thirty_days_ago = (datetime.now() - timedelta(days=30)).isoformat()
-        active_users_result = supabase_service.client.table('users').select('id', count='exact').gte('last_login', thirty_days_ago).execute()
+        active_users_result = supabase_service.client.table('profiles').select('id', count='exact').gte('last_login', thirty_days_ago).execute()
         active_users = active_users_result.count if active_users_result.count is not None else 0
 
         # 获取监控任务统计
@@ -441,8 +376,8 @@ async def get_monitor_status(
 @router.post("/users/batch-action", response_model=APIResponse)
 async def batch_user_action(
     action_data: Dict[str, Any],
-    current_user: UserInfo = Depends(require_system_admin_permission),
-    user_service: FastAPIUserService = Depends(get_user_service)
+    current_user: UserInfo = Depends(get_current_active_user),
+    auth_service: SupabaseAuthService = Depends(get_supabase_auth_service)
 ):
     """
     批量用户操作
@@ -460,11 +395,11 @@ async def batch_user_action(
         for user_id in user_ids:
             success = False
             if action == "block":
-                success = await user_service.block_user(user_id)
+                success = await auth_service.block_user(user_id)
             elif action == "unblock":
-                success = await user_service.unblock_user(user_id)
+                success = await auth_service.unblock_user(user_id)
             elif action == "delete":
-                success = await user_service.delete_user(user_id)
+                success = await auth_service.delete_user(user_id)
             results.append({"user_id": user_id, "success": success})
 
         success_count = len([r for r in results if r["success"]])
@@ -484,14 +419,14 @@ async def batch_user_action(
 async def search_users(
     q: str = Query(..., description="搜索关键词"),
     limit: int = Query(10, ge=1, le=50),
-    current_user: UserInfo = Depends(require_system_admin_permission),
-    user_service: FastAPIUserService = Depends(get_user_service)
+    current_user: UserInfo = Depends(get_current_active_user),
+    auth_service: SupabaseAuthService = Depends(get_supabase_auth_service)
 ):
     """
     搜索用户
     """
     try:
-        users = await user_service.search_users(q, limit)
+        users = await auth_service.search_users(q, limit)
         return APIResponse(success=True, message=f"找到 {len(users)} 个用户", data={"users": users, "query": q})
     except Exception as e:
         logger.error(f"搜索用户失败: {e}")
