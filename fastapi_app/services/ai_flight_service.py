@@ -8,7 +8,8 @@ AI增强航班搜索服务
 """
 
 import asyncio
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 """
 AI增强航班搜索服务
 
@@ -20,18 +21,25 @@ AI增强航班搜索服务
 """
 
 import asyncio
-from typing import List, Dict, Any, Optional
-from loguru import logger
 from datetime import datetime
+from typing import Any
+
+from loguru import logger
 
 # 检查smart-flights库是否可用
 try:
-    from fli.search import SearchFlights
     from fli.models import (
-        FlightSearchFilters, FlightSegment, Airport,
-        PassengerInfo, SeatType, MaxStops, SortBy, TripType
+        Airport,
+        FlightSearchFilters,
+        FlightSegment,
+        MaxStops,
+        PassengerInfo,
+        SeatType,
+        SortBy,
+        TripType,
     )
-    from fli.models.google_flights.base import LocalizationConfig, Language, Currency
+    from fli.models.google_flights.base import Currency, Language, LocalizationConfig
+    from fli.search import SearchFlights
 
     SMART_FLIGHTS_AVAILABLE = True
     logger.info("smart-flights服务可用")
@@ -45,21 +53,17 @@ except Exception as e:
 
 class AIFlightService:
     """AI增强航班搜索服务 - 专注于智能搜索和AI数据处理"""
-    
+
     def __init__(self):
-        self.stats = {
-            'total_requests': 0,
-            'successful_requests': 0,
-            'cache_hits': 0,
-            'cache_misses': 0
-        }
-        
+        self.stats = {'total_requests': 0, 'successful_requests': 0, 'cache_hits': 0, 'cache_misses': 0}
+
         # 测试数据保存功能已移除
-        
+
         # 初始化数据过滤器
         from ..utils.flight_data_filter import get_flight_data_filter
+
         self.data_filter = get_flight_data_filter()
-        
+
         logger.info("AIFlightService初始化成功")
 
     async def search_flights_ai_enhanced(
@@ -78,7 +82,7 @@ class AIFlightService:
         language: str = "zh",
         currency: str = "CNY",
         user_preferences: str = "",
-        is_guest_user: bool = False
+        is_guest_user: bool = False,
     ) -> dict:
         """
         AI增强航班搜索：
@@ -90,56 +94,55 @@ class AIFlightService:
             logger.info(f"开始AI增强搜索: {departure_code} → {destination_code} (用户类型: {user_type})")
 
             # 准备搜索参数（用于测试数据保存）
-            search_params = {
-                'departure_code': departure_code,
-                'destination_code': destination_code,
-                'depart_date': depart_date,
-                'return_date': return_date,
-                'adults': adults,
-                'seat_class': seat_class,
-                'children': children,
-                'infants_in_seat': infants_in_seat,
-                'infants_on_lap': infants_on_lap,
-                'max_stops': max_stops,
-                'sort_by': sort_by,
-                'language': language,
-                'currency': currency,
-                'user_preferences': user_preferences,
-                'is_guest_user': is_guest_user
-            }
 
             # 根据用户类型和行程类型决定搜索策略
             is_roundtrip = return_date is not None
 
             if is_guest_user:
                 logger.info("🎯 游客用户 - 执行简化搜索（仅第二阶段：Kiwi搜索）")
-                
+
                 # 游客用户：仅执行第二阶段（Kiwi搜索）
                 kiwi_flights_raw = await self._get_kiwi_raw_data(
-                    departure_code, destination_code, depart_date, return_date, 
-                    adults, seat_class, language, currency
+                    departure_code, destination_code, depart_date, return_date, adults, seat_class, language, currency
                 )
-                
+
                 # 空的第一阶段和第三阶段数据
                 google_flights_raw = []
                 ai_flights_raw = []
-                
+
                 logger.info(f"游客搜索完成: Kiwi({len(kiwi_flights_raw)}) 条航班")
-                
+
             elif is_roundtrip:
                 logger.info("✈️ 登录用户 - 执行两阶段搜索（往返航班：Google + Kiwi）")
 
                 tasks = [
                     # 阶段1: 获取Google Flights原始数据
                     self._get_google_raw_data(
-                        departure_code, destination_code, depart_date, return_date,
-                        adults, seat_class, children, infants_in_seat, infants_on_lap,
-                        max_stops, sort_by, language, currency
+                        departure_code,
+                        destination_code,
+                        depart_date,
+                        return_date,
+                        adults,
+                        seat_class,
+                        children,
+                        infants_in_seat,
+                        infants_on_lap,
+                        max_stops,
+                        sort_by,
+                        language,
+                        currency,
                     ),
                     # 阶段2: 获取Kiwi航班原始数据（包含隐藏城市和常规航班）
                     self._get_kiwi_raw_data(
-                        departure_code, destination_code, depart_date, return_date, adults, seat_class, language, currency
-                    )
+                        departure_code,
+                        destination_code,
+                        depart_date,
+                        return_date,
+                        adults,
+                        seat_class,
+                        language,
+                        currency,
+                    ),
                 ]
 
                 # 并行执行两个搜索任务
@@ -153,28 +156,54 @@ class AIFlightService:
                 tasks = [
                     # 阶段1: 获取Google Flights原始数据
                     self._get_google_raw_data(
-                        departure_code, destination_code, depart_date, return_date,
-                        adults, seat_class, children, infants_in_seat, infants_on_lap,
-                        max_stops, sort_by, language, currency
+                        departure_code,
+                        destination_code,
+                        depart_date,
+                        return_date,
+                        adults,
+                        seat_class,
+                        children,
+                        infants_in_seat,
+                        infants_on_lap,
+                        max_stops,
+                        sort_by,
+                        language,
+                        currency,
                     ),
                     # 阶段2: 获取Kiwi航班原始数据（包含隐藏城市和常规航班）
                     self._get_kiwi_raw_data(
-                        departure_code, destination_code, depart_date, return_date, adults, seat_class, language, currency
+                        departure_code,
+                        destination_code,
+                        depart_date,
+                        return_date,
+                        adults,
+                        seat_class,
+                        language,
+                        currency,
                     ),
                     # 阶段3: 获取AI推荐的隐藏城市原始数据
                     self._get_ai_hidden_raw_data(
-                        departure_code, destination_code, depart_date, return_date, adults, seat_class, language, currency
-                    )
+                        departure_code,
+                        destination_code,
+                        depart_date,
+                        return_date,
+                        adults,
+                        seat_class,
+                        language,
+                        currency,
+                    ),
                 ]
 
                 # 并行执行所有搜索任务
                 google_flights_raw, kiwi_flights_raw, ai_flights_raw = await asyncio.gather(*tasks)
 
-                logger.info(f"登录用户单程搜索完成: Google({len(google_flights_raw)}), Kiwi({len(kiwi_flights_raw)}), AI({len(ai_flights_raw)})")
+                logger.info(
+                    f"登录用户单程搜索完成: Google({len(google_flights_raw)}), Kiwi({len(kiwi_flights_raw)}), AI({len(ai_flights_raw)})"
+                )
 
             # 交给AI处理
             logger.info("开始AI处理")
-            
+
             ai_processed_result = await self._process_flights_with_ai(
                 google_flights=google_flights_raw,
                 kiwi_flights=kiwi_flights_raw,
@@ -188,15 +217,19 @@ class AIFlightService:
                 return_date=return_date,
                 adults=adults,
                 seat_class=seat_class,
-                currency=currency
+                currency=currency,
             )
 
             if ai_processed_result['success']:
                 logger.info("AI处理成功")
-                
+
                 # 根据用户类型确定搜索模式
-                search_mode = "guest_kiwi_only" if is_guest_user else ("full_three_stage" if not is_roundtrip else "registered_two_stage")
-                
+                search_mode = (
+                    "guest_kiwi_only"
+                    if is_guest_user
+                    else ("full_three_stage" if not is_roundtrip else "registered_two_stage")
+                )
+
                 return {
                     'success': True,
                     'data': {'itineraries': []},  # 不返回原始航班数据
@@ -205,7 +238,7 @@ class AIFlightService:
                     'ai_processing': {
                         'success': True,
                         'summary': ai_processed_result.get('summary', {}),
-                        'processing_info': ai_processed_result.get('processing_info', {})
+                        'processing_info': ai_processed_result.get('processing_info', {}),
                     },
                     'total_count': 0,  # 不计算原始航班数量
                     'search_info': {
@@ -219,9 +252,9 @@ class AIFlightService:
                         'stages_executed': {
                             'google_flights': len(google_flights_raw) > 0,
                             'kiwi_flights': len(kiwi_flights_raw) > 0,
-                            'ai_recommendations': len(ai_flights_raw) > 0
-                        }
-                    }
+                            'ai_recommendations': len(ai_flights_raw) > 0,
+                        },
+                    },
                 }
             else:
                 logger.error(f"AI处理失败: {ai_processed_result.get('error', '未知错误')}")
@@ -231,7 +264,7 @@ class AIFlightService:
                     'data': {'itineraries': []},
                     'flights': [],
                     'ai_analysis_report': '',
-                    'total_count': 0
+                    'total_count': 0,
                 }
 
         except Exception as e:
@@ -242,7 +275,7 @@ class AIFlightService:
                 'data': {'itineraries': []},
                 'flights': [],
                 'ai_analysis_report': '',
-                'total_count': 0
+                'total_count': 0,
             }
 
     async def _get_google_raw_data(
@@ -259,7 +292,7 @@ class AIFlightService:
         max_stops: str = "ANY",
         sort_by: str = "CHEAPEST",
         language: str = "zh",
-        currency: str = "CNY"
+        currency: str = "CNY",
     ) -> list:
         """获取Google Flights原始数据"""
         try:
@@ -272,9 +305,19 @@ class AIFlightService:
             results = await loop.run_in_executor(
                 None,
                 self._sync_search_google,
-                departure_code, destination_code, depart_date, return_date,
-                adults, seat_class, children, infants_in_seat, infants_on_lap,
-                max_stops, sort_by, language, currency
+                departure_code,
+                destination_code,
+                depart_date,
+                return_date,
+                adults,
+                seat_class,
+                children,
+                infants_in_seat,
+                infants_on_lap,
+                max_stops,
+                sort_by,
+                language,
+                currency,
             )
 
             # 过滤掉价格为0的航班数据
@@ -313,19 +356,24 @@ class AIFlightService:
                     price = flight.get('price') or flight.get('total_price') or flight.get('cost')
                 else:
                     # 如果是对象，尝试获取price属性
-                    price = getattr(flight, 'price', None) or getattr(flight, 'total_price', None) or getattr(flight, 'cost', None)
+                    price = (
+                        getattr(flight, 'price', None)
+                        or getattr(flight, 'total_price', None)
+                        or getattr(flight, 'cost', None)
+                    )
 
                 # 转换价格为数值
                 if price is not None:
                     if isinstance(price, str):
                         # 移除货币符号和逗号，提取数字
                         import re
+
                         price_str = re.sub(r'[^\d.]', '', price)
                         if price_str:
                             price = float(price_str)
                         else:
                             price = 0.0
-                    elif isinstance(price, (int, float)):
+                    elif isinstance(price, int | float):
                         price = float(price)
                     else:
                         price = 0.0
@@ -352,7 +400,7 @@ class AIFlightService:
         adults: int = 1,
         seat_class: str = "ECONOMY",
         language: str = "zh",
-        currency: str = "CNY"
+        currency: str = "CNY",
     ) -> list:
         """获取Kiwi航班原始数据（包含隐藏城市和常规航班）"""
         try:
@@ -365,13 +413,22 @@ class AIFlightService:
             results = await loop.run_in_executor(
                 None,
                 self._sync_search_kiwi,
-                departure_code, destination_code, depart_date, adults, language, currency, seat_class, return_date
+                departure_code,
+                destination_code,
+                depart_date,
+                adults,
+                language,
+                currency,
+                seat_class,
+                return_date,
             )
 
             # 【增强日志】记录原始返回数据的详细信息
             logger.info(f"🔍 [隐藏城市数据获取] 原始返回数据类型: {type(results)}")
             if results:
-                logger.info(f"🔍 [隐藏城市数据获取] 原始数据长度: {len(results) if isinstance(results, (list, dict)) else 'N/A'}")
+                logger.info(
+                    f"🔍 [隐藏城市数据获取] 原始数据长度: {len(results) if isinstance(results, list | dict) else 'N/A'}"
+                )
                 # 记录第一条数据的结构（用于调试）
                 if isinstance(results, list) and results:
                     first_item = results[0]
@@ -427,6 +484,7 @@ class AIFlightService:
                 # 检查数据的JSON序列化能力
                 try:
                     import json
+
                     # 尝试序列化第一条数据
                     if processed_data:
                         json_test = json.dumps(processed_data[0], default=str, ensure_ascii=False)
@@ -441,6 +499,7 @@ class AIFlightService:
         except Exception as e:
             logger.error(f"❌ [Kiwi数据获取] 获取失败: {e}")
             import traceback
+
             logger.error(f"❌ [Kiwi数据获取] 错误堆栈: {traceback.format_exc()}")
             return []
 
@@ -453,7 +512,7 @@ class AIFlightService:
         adults: int = 1,
         seat_class: str = "ECONOMY",
         language: str = "zh",
-        currency: str = "CNY"
+        currency: str = "CNY",
     ) -> list:
         """获取AI推荐的隐藏城市原始数据"""
         try:
@@ -500,6 +559,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 content = ai_response['content'].strip()
                 # 提取城市代码
                 import re
+
                 city_codes = re.findall(r'\b[A-Z]{3}\b', content)
                 hidden_destinations = city_codes[:10]  # 扩展到10个
                 logger.info(f"AI推荐的隐藏城市: {hidden_destinations}")
@@ -508,13 +568,21 @@ You must strictly follow this key principle: The most successful Skiplagging opp
             # 为每个隐藏城市搜索经过目标城市中转的航班
             for i, hidden_dest in enumerate(hidden_destinations[:10], 1):  # 处理最多10个
                 try:
-                    logger.debug(f"搜索 {departure_code} → {hidden_dest} ({i}/{len(hidden_destinations)})，指定经过 {destination_code} 中转")
+                    logger.debug(
+                        f"搜索 {departure_code} → {hidden_dest} ({i}/{len(hidden_destinations)})，指定经过 {destination_code} 中转"
+                    )
                     loop = asyncio.get_event_loop()
                     hidden_flights = await loop.run_in_executor(
                         None,
                         self._sync_search_with_layover,
-                        departure_code, hidden_dest, destination_code, depart_date,
-                        adults, language, currency, seat_class
+                        departure_code,
+                        hidden_dest,
+                        destination_code,
+                        depart_date,
+                        adults,
+                        language,
+                        currency,
+                        seat_class,
                     )
                     if hidden_flights:
                         # 为AI推荐的隐藏城市航班添加标记
@@ -525,7 +593,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                                     'hidden_destination_code': hidden_dest,
                                     'target_destination_code': destination_code,
                                     'ai_recommended': True,
-                                    'search_method': 'layover_restriction'
+                                    'search_method': 'layover_restriction',
                                 }
                             elif isinstance(flight, dict):
                                 flight['hidden_city_info'] = {
@@ -533,10 +601,12 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                                     'hidden_destination_code': hidden_dest,
                                     'target_destination_code': destination_code,
                                     'ai_recommended': True,
-                                    'search_method': 'layover_restriction'
+                                    'search_method': 'layover_restriction',
                                 }
                         raw_data.extend(hidden_flights)
-                        logger.info(f"✅ 找到经过 {destination_code} 中转到 {hidden_dest} 的航班: {len(hidden_flights)} 个")
+                        logger.info(
+                            f"✅ 找到经过 {destination_code} 中转到 {hidden_dest} 的航班: {len(hidden_flights)} 个"
+                        )
                     else:
                         logger.debug(f"❌ 未找到经过 {destination_code} 中转到 {hidden_dest} 的航班")
                 except Exception as e:
@@ -548,7 +618,9 @@ You must strictly follow this key principle: The most successful Skiplagging opp
 
             logger.info(f"获取AI推荐隐藏城市原始数据完成: {len(raw_data)} 条记录")
             if len(filtered_results) < len(raw_data):
-                logger.info(f"🔧 过滤掉价格为0的航班: {len(raw_data) - len(filtered_results)} 条，剩余: {len(filtered_results)} 条")
+                logger.info(
+                    f"🔧 过滤掉价格为0的航班: {len(raw_data) - len(filtered_results)} 条，剩余: {len(filtered_results)} 条"
+                )
 
             # 直接返回过滤后的结果，不在这里排序和限制数量
             # 最终的排序和数量限制将在所有数据源合并后统一处理
@@ -559,11 +631,22 @@ You must strictly follow this key principle: The most successful Skiplagging opp
             logger.error(f"获取AI推荐隐藏城市原始数据失败: {e}")
             return []
 
-    def _sync_search_google(self, departure_code: str, destination_code: str, depart_date: str,
-                          return_date: str = None, adults: int = 1, seat_class: str = "ECONOMY",
-                          children: int = 0, infants_in_seat: int = 0, infants_on_lap: int = 0,
-                          max_stops: str = "ANY", sort_by: str = "CHEAPEST",
-                          language: str = "zh", currency: str = "CNY") -> list:
+    def _sync_search_google(
+        self,
+        departure_code: str,
+        destination_code: str,
+        depart_date: str,
+        return_date: str = None,
+        adults: int = 1,
+        seat_class: str = "ECONOMY",
+        children: int = 0,
+        infants_in_seat: int = 0,
+        infants_on_lap: int = 0,
+        max_stops: str = "ANY",
+        sort_by: str = "CHEAPEST",
+        language: str = "zh",
+        currency: str = "CNY",
+    ) -> list:
         """同步执行Google Flights搜索"""
         try:
             if not SMART_FLIGHTS_AVAILABLE:
@@ -572,15 +655,12 @@ You must strictly follow this key principle: The most successful Skiplagging opp
             # 创建本地化配置 - 语言和货币根据前端参数动态设置（新版本不支持region参数）
             localization_config = LocalizationConfig(
                 language=Language.CHINESE if language == "zh" else Language.ENGLISH,
-                currency=Currency.CNY if currency == "CNY" else Currency.USD
+                currency=Currency.CNY if currency == "CNY" else Currency.USD,
             )
 
             # 创建乘客信息
             passenger_info = PassengerInfo(
-                adults=adults,
-                children=children,
-                infants_in_seat=infants_in_seat,
-                infants_on_lap=infants_on_lap
+                adults=adults, children=children, infants_in_seat=infants_in_seat, infants_on_lap=infants_on_lap
             )
 
             # 创建航班段 - 使用机场枚举
@@ -595,7 +675,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 FlightSegment(
                     departure_airport=[[departure_airport, 0]],
                     arrival_airport=[[destination_airport, 0]],
-                    travel_date=depart_date
+                    travel_date=depart_date,
                 )
             ]
 
@@ -604,7 +684,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                     FlightSegment(
                         departure_airport=[[destination_airport, 0]],
                         arrival_airport=[[departure_airport, 0]],
-                        travel_date=return_date
+                        travel_date=return_date,
                     )
                 )
 
@@ -613,7 +693,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 "ECONOMY": SeatType.ECONOMY,
                 "PREMIUM_ECONOMY": SeatType.PREMIUM_ECONOMY,
                 "BUSINESS": SeatType.BUSINESS,
-                "FIRST": SeatType.FIRST
+                "FIRST": SeatType.FIRST,
             }
             seat_type = seat_type_mapping.get(seat_class, SeatType.ECONOMY)
 
@@ -622,7 +702,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 "ANY": MaxStops.ANY,
                 "NON_STOP": MaxStops.NON_STOP,
                 "ONE_STOP_OR_FEWER": MaxStops.ONE_STOP_OR_FEWER,
-                "TWO_OR_FEWER_STOPS": MaxStops.TWO_OR_FEWER_STOPS
+                "TWO_OR_FEWER_STOPS": MaxStops.TWO_OR_FEWER_STOPS,
             }
             max_stops_enum = max_stops_mapping.get(max_stops, MaxStops.ANY)
 
@@ -633,7 +713,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 "DURATION": SortBy.DURATION,
                 "DEPARTURE_TIME": SortBy.DEPARTURE_TIME,
                 "ARRIVAL_TIME": SortBy.ARRIVAL_TIME,
-                "TOP_FLIGHTS": SortBy.TOP_FLIGHTS
+                "TOP_FLIGHTS": SortBy.TOP_FLIGHTS,
             }
             sort_by_enum = sort_by_mapping.get(sort_by, SortBy.CHEAPEST)
 
@@ -644,7 +724,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 flight_segments=flight_segments,
                 seat_type=seat_type,
                 stops=max_stops_enum,
-                sort_by=sort_by_enum
+                sort_by=sort_by_enum,
             )
 
             # 根据行程类型设置不同的top_n值
@@ -667,9 +747,17 @@ You must strictly follow this key principle: The most successful Skiplagging opp
             logger.error(f"Google Flights搜索失败: {e}")
             return []
 
-    def _sync_search_kiwi(self, departure_code: str, destination_code: str, depart_date: str,
-                         adults: int = 1, language: str = "zh", currency: str = "CNY",
-                         seat_class: str = "ECONOMY", return_date: str = None) -> list:
+    def _sync_search_kiwi(
+        self,
+        departure_code: str,
+        destination_code: str,
+        depart_date: str,
+        adults: int = 1,
+        language: str = "zh",
+        currency: str = "CNY",
+        seat_class: str = "ECONOMY",
+        return_date: str = None,
+    ) -> list:
         """同步执行Kiwi航班搜索 - 正确处理API响应格式"""
         try:
             if not SMART_FLIGHTS_AVAILABLE:
@@ -687,6 +775,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 api_regular = KiwiFlightsAPI()
 
                 import asyncio
+
                 try:
                     loop = asyncio.get_event_loop()
                     regular_response = loop.run_until_complete(
@@ -697,7 +786,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                             adults=adults,
                             limit=25,
                             cabin_class=seat_class,  # 🔧 修复：传递舱位参数
-                            hidden_city_only=False  # 获取普通航班
+                            hidden_city_only=False,  # 获取普通航班
                         )
                     )
                 except RuntimeError:
@@ -710,7 +799,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                             adults=adults,
                             limit=25,
                             cabin_class=seat_class,  # 🔧 修复：传递舱位参数
-                            hidden_city_only=False  # 获取普通航班
+                            hidden_city_only=False,  # 获取普通航班
                         )
                     )
 
@@ -733,6 +822,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 api_hidden = KiwiFlightsAPI()
 
                 import asyncio
+
                 try:
                     loop = asyncio.get_event_loop()
                     hidden_response = loop.run_until_complete(
@@ -743,7 +833,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                             adults=adults,
                             limit=25,
                             cabin_class=seat_class,  # 🔧 修复：传递舱位参数
-                            hidden_city_only=True   # 获取隐藏城市航班
+                            hidden_city_only=True,  # 获取隐藏城市航班
                         )
                     )
                 except RuntimeError:
@@ -756,7 +846,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                             adults=adults,
                             limit=25,
                             cabin_class=seat_class,  # 🔧 修复：传递舱位参数
-                            hidden_city_only=True   # 获取隐藏城市航班
+                            hidden_city_only=True,  # 获取隐藏城市航班
                         )
                     )
 
@@ -777,7 +867,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
             # 处理搜索结果
             if not all_results:
                 # 如果没有找到航班，返回状态信息
-                logger.info(f"ℹ️ [Kiwi搜索] 未找到航班，返回状态信息")
+                logger.info("ℹ️ [Kiwi搜索] 未找到航班，返回状态信息")
                 status_info = {
                     'id': 'kiwi_no_flights',
                     'source': 'kiwi_flights_api',
@@ -788,11 +878,11 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                         'destination': destination_code,
                         'departure_date': depart_date,
                         'adults': adults,
-                        'seat_class': seat_class
+                        'seat_class': seat_class,
                     },
                     'is_hidden_city': False,
                     'flight_type': 'no_flights',
-                    'api_status': 'success_but_empty'
+                    'api_status': 'success_but_empty',
                 }
                 return [status_info]
 
@@ -806,11 +896,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                     # 使用优化的数据转换方法
                     flight_dict = self._optimize_kiwi_flight_data(flight.copy())
                 else:
-                    flight_dict = {
-                        'id': f'kiwi_{i}',
-                        'raw_data': str(flight),
-                        'source': 'kiwi_flights_api'
-                    }
+                    flight_dict = {'id': f'kiwi_{i}', 'raw_data': str(flight), 'source': 'kiwi_flights_api'}
 
                 # 添加隐藏城市标识 - 使用API原生字段
                 original_is_hidden = flight_dict.get('is_hidden_city', False)
@@ -831,6 +917,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
         except Exception as e:
             logger.error(f"❌ [Kiwi搜索] 搜索失败: {e}")
             import traceback
+
             logger.error(f"❌ [Kiwi搜索] 错误堆栈: {traceback.format_exc()}")
             return []
 
@@ -850,36 +937,30 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 # 基本标识
                 'id': flight_data.get('id', ''),
                 'source': 'kiwi_flights_api',
-
                 # 价格信息
                 'price': flight_data.get('price', ''),
                 'price_eur': flight_data.get('price_eur', ''),
                 'currency': flight_data.get('currency', 'USD'),
                 'currency_symbol': flight_data.get('currency_symbol', '$'),
-
                 # 时间信息
                 'departure_time': flight_data.get('departure_time', ''),
                 'arrival_time': flight_data.get('arrival_time', ''),
                 'duration': flight_data.get('duration', 0),
                 'duration_minutes': flight_data.get('duration_minutes', 0),
-
                 # 机场信息
                 'departure_airport': flight_data.get('departure_airport', ''),
                 'departure_airport_name': flight_data.get('departure_airport_name', ''),
                 'arrival_airport': flight_data.get('arrival_airport', ''),
                 'arrival_airport_name': flight_data.get('arrival_airport_name', ''),
-
                 # 航空公司信息
                 'carrier_code': flight_data.get('carrier_code', ''),
                 'carrier_name': flight_data.get('carrier_name', ''),
                 'flight_number': flight_data.get('flight_number', ''),
-
                 # 隐藏城市信息
                 'is_hidden_city': flight_data.get('is_hidden_city', False),
                 'is_throwaway': flight_data.get('is_throwaway', False),
                 'hidden_destination_code': flight_data.get('hidden_destination_code', ''),
                 'hidden_destination_name': flight_data.get('hidden_destination_name', ''),
-
                 # 路线信息
                 'segment_count': flight_data.get('segment_count', 0),
                 'route_segments': flight_data.get('route_segments', []),
@@ -942,7 +1023,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 'carrier_name': flight_data.get('carrier_name', ''),
                 'is_hidden_city': flight_data.get('is_hidden_city', False),
                 'error': f"数据优化失败: {e}",
-                '_original_data': flight_data
+                '_original_data': flight_data,
             }
 
     def _build_route_description(self, route_segments: list) -> str:
@@ -1033,8 +1114,6 @@ You must strictly follow this key principle: The most successful Skiplagging opp
             logger.error(f"❌ 标准化航班字段失败: {e}")
             # 不抛出异常，继续处理
 
-
-
     def _clean_data_for_ai(self, data: list, data_type: str) -> list:
         """
         清理数据，移除无用字段以节省AI token
@@ -1056,46 +1135,91 @@ You must strictly follow this key principle: The most successful Skiplagging opp
             useful_fields = {
                 'kiwi': {
                     # 基本信息
-                    'source', 'price', 'currency', 'currency_symbol',
+                    'source',
+                    'price',
+                    'currency',
+                    'currency_symbol',
                     # 时间信息
-                    'departure_time', 'arrival_time', 'duration_formatted', 'duration_minutes',
+                    'departure_time',
+                    'arrival_time',
+                    'duration_formatted',
+                    'duration_minutes',
                     # 机场信息
-                    'departure_airport', 'departure_airport_name',
-                    'arrival_airport', 'arrival_airport_name',
+                    'departure_airport',
+                    'departure_airport_name',
+                    'arrival_airport',
+                    'arrival_airport_name',
                     # 航空公司信息
-                    'carrier_name', 'carrier_code', 'flight_number',
+                    'carrier_name',
+                    'carrier_code',
+                    'flight_number',
                     # 路线信息
-                    'route_path', 'route_description', 'segment_count', 'route_segments',
+                    'route_path',
+                    'route_description',
+                    'segment_count',
+                    'route_segments',
                     # 航班类型
-                    'flight_type', 'flight_type_description', 'is_hidden_city',
+                    'flight_type',
+                    'flight_type_description',
+                    'is_hidden_city',
                     # 隐藏城市信息
-                    'hidden_destination_code', 'hidden_destination_name', 'is_throwaway',
+                    'hidden_destination_code',
+                    'hidden_destination_name',
+                    'is_throwaway',
                     # 标准化字段
-                    'airline', 'origin', 'destination', 'price_numeric'
+                    'airline',
+                    'origin',
+                    'destination',
+                    'price_numeric',
                 },
                 'google': {
                     # 保留Google Flights的核心字段
-                    'price', 'currency', 'stops', 'legs',
+                    'price',
+                    'currency',
+                    'stops',
+                    'legs',
                     # 航空公司信息（如果有值）
-                    'airline', 'flightNumber',
+                    'airline',
+                    'flightNumber',
                     # 时间信息（如果有值）
-                    'departureTime', 'arrivalTime', 'duration',
+                    'departureTime',
+                    'arrivalTime',
+                    'duration',
                     # 直飞标识
-                    'isDirect', 'stopsText',
+                    'isDirect',
+                    'stopsText',
                     # 机场信息
-                    'departure_airport', 'arrival_airport'
+                    'departure_airport',
+                    'arrival_airport',
                 },
                 'ai': {
                     # 保留AI推荐数据的主要字段
-                    'airline', 'flightNumber', 'departureTime', 'arrivalTime',
-                    'duration', 'stops', 'isDirect', 'stopsText', 'price', 'currency',
-                    'legs', 'departure_airport', 'arrival_airport', 'total_price',
+                    'airline',
+                    'flightNumber',
+                    'departureTime',
+                    'arrivalTime',
+                    'duration',
+                    'stops',
+                    'isDirect',
+                    'stopsText',
+                    'price',
+                    'currency',
+                    'legs',
+                    'departure_airport',
+                    'arrival_airport',
+                    'total_price',
                     # 隐藏城市和路径信息
-                    'hidden_city_info', 'is_hidden_city', 'ai_recommended',
-                    'hidden_destination_code', 'hidden_destination_name',
+                    'hidden_city_info',
+                    'is_hidden_city',
+                    'ai_recommended',
+                    'hidden_destination_code',
+                    'hidden_destination_name',
                     # 路径信息 - 关键：AI推荐航班需要显示完整路径
-                    'route_path', 'route_description', 'segment_count', 'route_segments'
-                }
+                    'route_path',
+                    'route_description',
+                    'segment_count',
+                    'route_segments',
+                },
             }
 
             # 无用字段列表（这些字段会被明确移除）
@@ -1106,7 +1230,6 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 'price_eur',  # 欧元价格，通常不需要
                 'trip_type',  # 行程类型，通常是固定值
                 'duration',  # 秒数格式的持续时间，有duration_formatted就够了
-
                 # Google Flights数据的无用字段
                 'price_amount',  # 重复的价格字段
                 'departureDateTime',  # ISO格式时间，有departureTime就够了
@@ -1116,7 +1239,6 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 'type',  # 数据类型信息，对AI无用
                 'error',  # 错误信息，对AI分析无用
                 'total_price',  # 重复的价格字段，有price就够了
-
                 # 通用无用字段
                 'hidden_city_info',  # 如果为None则无用
             }
@@ -1155,12 +1277,15 @@ You must strictly follow this key principle: The most successful Skiplagging opp
 
             # 记录清理效果
             import json
+
             original_size = len(json.dumps(data, ensure_ascii=False)) if data else 0
             cleaned_size = len(json.dumps(cleaned_data, ensure_ascii=False))
             reduction_percent = (1 - cleaned_size / original_size) * 100 if original_size > 0 else 0
 
             logger.info(f"🧹 [数据清理] {data_type}数据: {len(data)}条 → {len(cleaned_data)}条")
-            logger.info(f"📊 [数据清理] {data_type}大小: {original_size:,} → {cleaned_size:,} 字符 (减少{reduction_percent:.1f}%)")
+            logger.info(
+                f"📊 [数据清理] {data_type}大小: {original_size:,} → {cleaned_size:,} 字符 (减少{reduction_percent:.1f}%)"
+            )
 
             return cleaned_data
 
@@ -1169,9 +1294,17 @@ You must strictly follow this key principle: The most successful Skiplagging opp
             # 清理失败时返回原始数据
             return data
 
-    def _sync_search_with_layover(self, departure_code: str, final_destination: str,
-                                layover_airport: str, depart_date: str, adults: int = 1,
-                                language: str = "zh", currency: str = "CNY", seat_class: str = "ECONOMY") -> list:
+    def _sync_search_with_layover(
+        self,
+        departure_code: str,
+        final_destination: str,
+        layover_airport: str,
+        depart_date: str,
+        adults: int = 1,
+        language: str = "zh",
+        currency: str = "CNY",
+        seat_class: str = "ECONOMY",
+    ) -> list:
         """同步搜索航班并手动过滤出经过指定中转机场的航班"""
         try:
             if not SMART_FLIGHTS_AVAILABLE:
@@ -1182,7 +1315,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
             # 创建本地化配置
             localization_config = LocalizationConfig(
                 language=Language.CHINESE if language == "zh" else Language.ENGLISH,
-                currency=Currency.CNY if currency == "CNY" else Currency.USD
+                currency=Currency.CNY if currency == "CNY" else Currency.USD,
             )
 
             # 创建乘客信息
@@ -1200,7 +1333,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 FlightSegment(
                     departure_airport=[[departure_airport, 0]],
                     arrival_airport=[[final_destination_airport, 0]],
-                    travel_date=depart_date
+                    travel_date=depart_date,
                 )
             ]
 
@@ -1209,7 +1342,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 "ECONOMY": SeatType.ECONOMY,
                 "PREMIUM_ECONOMY": SeatType.PREMIUM_ECONOMY,
                 "BUSINESS": SeatType.BUSINESS,
-                "FIRST": SeatType.FIRST
+                "FIRST": SeatType.FIRST,
             }
             seat_type = seat_type_mapping.get(seat_class, SeatType.ECONOMY)
 
@@ -1220,7 +1353,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 flight_segments=flight_segments,
                 seat_type=seat_type,
                 stops=MaxStops.ANY,  # 允许中转
-                sort_by=SortBy.CHEAPEST
+                sort_by=SortBy.CHEAPEST,
             )
 
             # 执行搜索
@@ -1240,8 +1373,16 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                     # 检查航班是否经过指定的中转机场
                     route_airports = []
                     for leg in flight.legs:
-                        departure_airport_code = getattr(leg, 'departure_airport', '').name if hasattr(getattr(leg, 'departure_airport', ''), 'name') else str(getattr(leg, 'departure_airport', ''))
-                        arrival_airport_code = getattr(leg, 'arrival_airport', '').name if hasattr(getattr(leg, 'arrival_airport', ''), 'name') else str(getattr(leg, 'arrival_airport', ''))
+                        departure_airport_code = (
+                            getattr(leg, 'departure_airport', '').name
+                            if hasattr(getattr(leg, 'departure_airport', ''), 'name')
+                            else str(getattr(leg, 'departure_airport', ''))
+                        )
+                        arrival_airport_code = (
+                            getattr(leg, 'arrival_airport', '').name
+                            if hasattr(getattr(leg, 'arrival_airport', ''), 'name')
+                            else str(getattr(leg, 'arrival_airport', ''))
+                        )
 
                         # 提取机场代码（去掉Airport.前缀）
                         if 'Airport.' in departure_airport_code:
@@ -1271,9 +1412,9 @@ You must strictly follow this key principle: The most successful Skiplagging opp
 
     async def _process_flights_with_ai(
         self,
-        google_flights: List[Dict],
-        kiwi_flights: List[Dict],
-        ai_flights: List[Dict],
+        google_flights: list[dict],
+        kiwi_flights: list[dict],
+        ai_flights: list[dict],
         language: str = "zh",
         departure_code: str = "",
         destination_code: str = "",
@@ -1284,8 +1425,8 @@ You must strictly follow this key principle: The most successful Skiplagging opp
         return_date: str = None,
         adults: int = 1,
         seat_class: str = "ECONOMY",
-        currency: str = "CNY"
-    ) -> Dict[str, Any]:
+        currency: str = "CNY",
+    ) -> dict[str, Any]:
         """
         使用AI处理航班数据，支持重试机制
         """
@@ -1296,7 +1437,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 logger.info(f"🤖 [AI处理] 开始处理航班数据: {departure_code} → {destination_code}")
 
                 # 【增强日志】详细记录输入数据的结构和内容
-                logger.info(f"🔍 [AI处理] 输入数据统计:")
+                logger.info("🔍 [AI处理] 输入数据统计:")
 
                 # Google Flights数据分析
                 google_count = len(google_flights) if isinstance(google_flights, list) else 0
@@ -1333,14 +1474,15 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 if kiwi_flights:
                     try:
                         import json
+
                         # 测试Kiwi数据的序列化
                         if isinstance(kiwi_flights, list) and kiwi_flights:
                             test_kiwi = json.dumps(kiwi_flights[0], default=str, ensure_ascii=False)
-                            logger.info(f"✅ [AI处理] Kiwi数据JSON序列化测试成功")
+                            logger.info("✅ [AI处理] Kiwi数据JSON序列化测试成功")
                             logger.info(f"🔍 [AI处理] Kiwi序列化样本: {test_kiwi[:200]}...")
                         elif isinstance(kiwi_flights, dict):
                             test_kiwi = json.dumps(kiwi_flights, default=str, ensure_ascii=False)
-                            logger.info(f"✅ [AI处理] Kiwi字典数据JSON序列化测试成功")
+                            logger.info("✅ [AI处理] Kiwi字典数据JSON序列化测试成功")
                             logger.info(f"🔍 [AI处理] Kiwi序列化长度: {len(test_kiwi)}")
                     except Exception as kiwi_json_error:
                         logger.error(f"❌ [AI处理] Kiwi数据JSON序列化失败: {kiwi_json_error}")
@@ -1357,28 +1499,34 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                             'google_flights': 0,
                             'kiwi_flights': 0,
                             'ai_flights': 0,
-                            'processing_method': 'empty_data'
-                        }
+                            'processing_method': 'empty_data',
+                        },
                     }
 
                 # 🔧 使用数据过滤器清理冗余字段，保留核心信息
                 logger.info("🧹 [数据清理] 开始清理航班数据冗余字段")
-                
+
                 try:
                     import json
-                    
+
                     # 添加调试信息：检查输入数据类型
-                    logger.info(f"🔍 [数据清理调试] google_flights类型: {type(google_flights)}, 长度: {len(google_flights) if google_flights else 0}")
-                    logger.info(f"🔍 [数据清理调试] kiwi_flights类型: {type(kiwi_flights)}, 长度: {len(kiwi_flights) if kiwi_flights else 0}")
-                    logger.info(f"🔍 [数据清理调试] ai_flights类型: {type(ai_flights)}, 长度: {len(ai_flights) if ai_flights else 0}")
-                    
+                    logger.info(
+                        f"🔍 [数据清理调试] google_flights类型: {type(google_flights)}, 长度: {len(google_flights) if google_flights else 0}"
+                    )
+                    logger.info(
+                        f"🔍 [数据清理调试] kiwi_flights类型: {type(kiwi_flights)}, 长度: {len(kiwi_flights) if kiwi_flights else 0}"
+                    )
+                    logger.info(
+                        f"🔍 [数据清理调试] ai_flights类型: {type(ai_flights)}, 长度: {len(ai_flights) if ai_flights else 0}"
+                    )
+
                     if google_flights and len(google_flights) > 0:
                         logger.info(f"🔍 [数据清理调试] google_flights[0]类型: {type(google_flights[0])}")
                     if kiwi_flights and len(kiwi_flights) > 0:
                         logger.info(f"🔍 [数据清理调试] kiwi_flights[0]类型: {type(kiwi_flights[0])}")
                     if ai_flights and len(ai_flights) > 0:
                         logger.info(f"🔍 [数据清理调试] ai_flights[0]类型: {type(ai_flights[0])}")
-                    
+
                     # 计算原始数据大小（用JSON字符串长度）
                     def safe_json_size(data):
                         """安全计算数据的JSON序列化大小"""
@@ -1387,19 +1535,21 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                         try:
                             # 如果是Pydantic模型列表，转换为字典
                             if isinstance(data, list) and data and hasattr(data[0], 'model_dump'):
-                                serializable_data = [item.model_dump() if hasattr(item, 'model_dump') else item for item in data]
+                                serializable_data = [
+                                    item.model_dump() if hasattr(item, 'model_dump') else item for item in data
+                                ]
                             else:
                                 serializable_data = data
                             return len(json.dumps(serializable_data, ensure_ascii=False, default=str))
                         except Exception:
                             return 0
-                    
+
                     original_data_size = {
                         'google_size': safe_json_size(google_flights),
                         'kiwi_size': safe_json_size(kiwi_flights),
-                        'ai_size': safe_json_size(ai_flights)
+                        'ai_size': safe_json_size(ai_flights),
                     }
-                    
+
                     # 清理多源数据的冗余字段，并保存数据对比
                     search_params_for_save = {
                         'departure_code': departure_code,
@@ -1411,41 +1561,43 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                         'language': language,
                         'currency': currency,
                         'is_guest_user': is_guest_user,
-                        'user_preferences': user_preferences
+                        'user_preferences': user_preferences,
                     }
-                    
+
                     cleaned_data = self.data_filter.clean_multi_source_data(
                         google_flights=google_flights,
                         kiwi_flights=kiwi_flights,
                         ai_flights=ai_flights,
                         search_params=search_params_for_save,
-                        save_comparison=True  # 启用数据保存
+                        save_comparison=True,  # 启用数据保存
                     )
-                    
+
                     # 计算清理后数据大小（用JSON字符串长度）
                     cleaned_data_size = {
                         'google_size': safe_json_size(cleaned_data.get('google_flights', [])),
                         'kiwi_size': safe_json_size(cleaned_data.get('kiwi_flights', [])),
-                        'ai_size': safe_json_size(cleaned_data.get('ai_flights', []))
+                        'ai_size': safe_json_size(cleaned_data.get('ai_flights', [])),
                     }
-                    
+
                     # 计算压缩效果
                     total_original = sum(original_data_size.values())
                     total_cleaned = sum(cleaned_data_size.values())
                     compression_ratio = (1 - total_cleaned / total_original) * 100 if total_original > 0 else 0
-                    
-                    logger.info(f"📊 [数据清理] 冗余字段清理完成:")
+
+                    logger.info("📊 [数据清理] 冗余字段清理完成:")
                     logger.info(f"  • 数据体积: {total_original:,} → {total_cleaned:,} 字符")
                     logger.info(f"  • 压缩率: {compression_ratio:.1f}%")
-                    logger.info(f"  • Google: {original_data_size['google_size']:,} → {cleaned_data_size['google_size']:,}")
+                    logger.info(
+                        f"  • Google: {original_data_size['google_size']:,} → {cleaned_data_size['google_size']:,}"
+                    )
                     logger.info(f"  • Kiwi: {original_data_size['kiwi_size']:,} → {cleaned_data_size['kiwi_size']:,}")
                     logger.info(f"  • AI推荐: {original_data_size['ai_size']:,} → {cleaned_data_size['ai_size']:,}")
-                    
+
                     # 使用清理后的数据进行AI处理
                     google_flights = cleaned_data.get('google_flights', [])
                     kiwi_flights = cleaned_data.get('kiwi_flights', [])
                     ai_flights = cleaned_data.get('ai_flights', [])
-                    
+
                 except Exception as filter_error:
                     logger.error(f"❌ [数据清理] 清理失败，使用原始数据: {filter_error}")
                     # 降级处理：对AI推荐数据进行简单排序和数量限制
@@ -1462,15 +1614,27 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 final_total = len(google_flights) + len(kiwi_flights) + len(ai_flights)
                 logger.info(f"📊 [AI处理] 最终处理{final_total}条航班数据，使用重试机制")
                 processed_data = await self._process_with_fallback_ai(
-                    google_flights, kiwi_flights, ai_flights,
-                    language, departure_code, destination_code, user_preferences, is_guest_user,
-                    depart_date, return_date, adults, seat_class, currency
+                    google_flights,
+                    kiwi_flights,
+                    ai_flights,
+                    language,
+                    departure_code,
+                    destination_code,
+                    user_preferences,
+                    is_guest_user,
+                    depart_date,
+                    return_date,
+                    adults,
+                    seat_class,
+                    currency,
                 )
 
                 # 记录processed_data的基本信息
                 logger.info(f"🔍 [AI处理结果] processed_data类型: {type(processed_data)}")
                 if processed_data:
-                    logger.info(f"🔍 [AI处理结果] processed_data键: {list(processed_data.keys()) if isinstance(processed_data, dict) else 'Not a dict'}")
+                    logger.info(
+                        f"🔍 [AI处理结果] processed_data键: {list(processed_data.keys()) if isinstance(processed_data, dict) else 'Not a dict'}"
+                    )
                     ai_report = processed_data.get('ai_analysis_report', '')
                     logger.info(f"🔍 [AI处理结果] ai_analysis_report长度: {len(ai_report)}")
                     if not ai_report:
@@ -1481,8 +1645,10 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 if processed_data and processed_data.get('ai_analysis_report'):
                     # 检查是否是新的Markdown格式
                     if processed_data.get('summary', {}).get('markdown_format'):
-                        logger.info(f"✅ AI Markdown分析报告生成成功")
-                        logger.info(f"📊 处理了 {len(google_flights) + len(kiwi_flights) + len(ai_flights)} 个原始航班，生成智能分析报告")
+                        logger.info("✅ AI Markdown分析报告生成成功")
+                        logger.info(
+                            f"📊 处理了 {len(google_flights) + len(kiwi_flights) + len(ai_flights)} 个原始航班，生成智能分析报告"
+                        )
 
                         # 只返回AI分析报告，不返回航班数据
                         ai_report = processed_data.get('ai_analysis_report', '')
@@ -1497,17 +1663,17 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                             'processing_info': {
                                 'source_counts': {
                                     'regular_search': len(google_flights),
-                                'hidden_city_search': len(kiwi_flights),
-                                'ai_analysis': len(ai_flights)
+                                    'hidden_city_search': len(kiwi_flights),
+                                    'ai_analysis': len(ai_flights),
+                                },
+                                'processed_at': datetime.now().isoformat(),
+                                'language': language,
+                                'processor': 'ai_markdown',
+                                'user_preferences': user_preferences,
+                                'format': 'markdown',
+                                'report_only': True,  # 标记只返回报告
                             },
-                            'processed_at': datetime.now().isoformat(),
-                            'language': language,
-                            'processor': 'ai_markdown',
-                            'user_preferences': user_preferences,
-                            'format': 'markdown',
-                            'report_only': True  # 标记只返回报告
                         }
-                    }
                     else:
                         # 兼容旧的JSON格式
                         logger.info(f"✅ AI数据处理成功，处理了 {len(processed_data.get('flights', []))} 个航班")
@@ -1520,14 +1686,14 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                                 'source_counts': {
                                     'regular_search': len(google_flights),
                                     'hidden_city_search': len(kiwi_flights),
-                                    'ai_analysis': len(ai_flights)
+                                    'ai_analysis': len(ai_flights),
                                 },
                                 'processed_at': datetime.now().isoformat(),
                                 'language': language,
                                 'processor': 'ai',
                                 'user_preferences': user_preferences,
-                                'format': 'json'
-                            }
+                                'format': 'json',
+                            },
                         }
                 else:
                     # AI处理失败或返回空内容时，抛出异常触发重试
@@ -1538,6 +1704,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 logger.error(f"AI航班数据处理异常 (尝试 {attempt + 1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
                     import asyncio
+
                     wait_time = (attempt + 1) * 2  # 递增等待时间：2秒、4秒、6秒
                     logger.info(f"⏳ {wait_time}秒后重试...")
                     await asyncio.sleep(wait_time)
@@ -1545,13 +1712,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 else:
                     # 所有重试都失败了
                     logger.error(f"❌ AI航班数据处理失败，已重试 {max_retries} 次")
-                    return {
-                        'success': False,
-                        'flights': [],
-                        'error': f"AI处理失败，已重试 {max_retries} 次: {str(e)}"
-                    }
-
-
+                    return {'success': False, 'flights': [], 'error': f"AI处理失败，已重试 {max_retries} 次: {str(e)}"}
 
     def _convert_flight_to_dict(self, flight) -> dict:
         """将FlightResult对象转换为字典格式 - 优化版本"""
@@ -1587,7 +1748,16 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 flight_dict = {}
 
                 # 基本属性
-                basic_attrs = ['airline', 'flightNumber', 'departureTime', 'arrivalTime', 'duration', 'stops', 'isDirect', 'stopsText']
+                basic_attrs = [
+                    'airline',
+                    'flightNumber',
+                    'departureTime',
+                    'arrivalTime',
+                    'duration',
+                    'stops',
+                    'isDirect',
+                    'stopsText',
+                ]
                 for attr in basic_attrs:
                     if hasattr(flight, attr):
                         value = getattr(flight, attr)
@@ -1595,7 +1765,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
 
                 # 处理价格对象
                 if hasattr(flight, 'price'):
-                    price_obj = getattr(flight, 'price')
+                    price_obj = flight.price
                     if hasattr(price_obj, 'formatted'):
                         flight_dict['price'] = price_obj.formatted
                         flight_dict['price_amount'] = getattr(price_obj, 'amount', 0)
@@ -1639,23 +1809,25 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                             if hasattr(leg, 'durationInMinutes'):
                                 leg_dict['duration'] = leg.durationInMinutes
                             legs_data.append(leg_dict)
-                        
+
                         flight_dict['legs'] = legs_data
-                        
+
                         # 构建完整路径信息 - 关键：AI推荐航班需要显示完整路径
                         if route_path:
                             flight_dict['route_path'] = ' → '.join(route_path)
                             flight_dict['segment_count'] = len(legs_data)
-                            
+
                             # 构建路径描述
                             route_segments = []
                             for leg_dict in legs_data:
-                                route_segments.append({
-                                    'from': leg_dict.get('origin', ''),
-                                    'to': leg_dict.get('destination', ''),
-                                    'carrier': flight_dict.get('airline', ''),
-                                    'flight_number': flight_dict.get('flightNumber', '')
-                                })
+                                route_segments.append(
+                                    {
+                                        'from': leg_dict.get('origin', ''),
+                                        'to': leg_dict.get('destination', ''),
+                                        'carrier': flight_dict.get('airline', ''),
+                                        'flight_number': flight_dict.get('flightNumber', ''),
+                                    }
+                                )
                             flight_dict['route_segments'] = route_segments
                             flight_dict['route_description'] = self._build_route_description(route_segments)
                     else:
@@ -1665,7 +1837,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
 
                 # 处理隐藏城市信息
                 if hasattr(flight, 'hidden_city_info'):
-                    hidden_info = getattr(flight, 'hidden_city_info')
+                    hidden_info = flight.hidden_city_info
                     if hidden_info:
                         flight_dict['hidden_city_info'] = hidden_info
                         # 提取关键标识到顶层，便于AI识别
@@ -1710,7 +1882,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                     'flightNumber': 'N/A',
                     'price': 'N/A',
                     'departureTime': 'N/A',
-                    'arrivalTime': 'N/A'
+                    'arrivalTime': 'N/A',
                 }
 
         except Exception as e:
@@ -1723,18 +1895,18 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 'flightNumber': 'N/A',
                 'price': 'N/A',
                 'departureTime': 'N/A',
-                'arrivalTime': 'N/A'
+                'arrivalTime': 'N/A',
             }
 
     def _build_processing_prompt(
         self,
-        google_data: List,
-        kiwi_data: List,
-        ai_data: List,
+        google_data: list,
+        kiwi_data: list,
+        ai_data: list,
         language: str,
         departure_code: str,
         destination_code: str,
-        user_preferences: str = ""
+        user_preferences: str = "",
     ) -> str:
         """构建AI处理提示 - 直接使用原始数据，不进行转换"""
 
@@ -1753,16 +1925,27 @@ You must strictly follow this key principle: The most successful Skiplagging opp
             language=language,
             departure_code=departure_code,
             destination_code=destination_code,
-            user_preferences=user_preferences
+            user_preferences=user_preferences,
         )
-
-
 
     # 移除多轮对话方法，统一使用单轮对话处理
 
-    async def _process_with_fallback_ai(self, google_flights, kiwi_flights, ai_flights,
-                                       language, departure_code, destination_code, user_preferences, is_guest_user=False,
-                                       depart_date="", return_date=None, adults=1, seat_class="ECONOMY", currency="CNY"):
+    async def _process_with_fallback_ai(
+        self,
+        google_flights,
+        kiwi_flights,
+        ai_flights,
+        language,
+        departure_code,
+        destination_code,
+        user_preferences,
+        is_guest_user=False,
+        depart_date="",
+        return_date=None,
+        adults=1,
+        seat_class="ECONOMY",
+        currency="CNY",
+    ):
         """使用重试机制处理航班数据，根据用户类型选择不同模型"""
         max_retries = 3
 
@@ -1772,19 +1955,25 @@ You must strictly follow this key principle: The most successful Skiplagging opp
 
                 # 构建完整的单轮提示词
                 prompt = self._build_processing_prompt(
-                    google_flights, kiwi_flights, ai_flights,
-                    language, departure_code, destination_code, user_preferences
+                    google_flights,
+                    kiwi_flights,
+                    ai_flights,
+                    language,
+                    departure_code,
+                    destination_code,
+                    user_preferences,
                 )
 
                 # 根据用户类型选择不同的AI模型
                 from ..config.settings import AI_MODEL, AI_MODEL_AUTHENTICATED
+
                 if is_guest_user:
                     model_name = AI_MODEL  # 游客用户使用默认模型
                     user_type_desc = "游客用户"
                 else:
                     model_name = AI_MODEL_AUTHENTICATED  # 登录用户使用专用模型
                     user_type_desc = "登录用户"
-                
+
                 payload_size = len(prompt.encode('utf-8'))
                 logger.info(f"🤖 {user_type_desc}使用AI模型: {model_name} (数据量: {payload_size:,}字节)")
 
@@ -1795,7 +1984,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
 
                     logger.info(f"✅ AI处理成功，{user_type_desc}使用模型: {model_name}")
                     logger.info(f"📝 AI返回内容长度: {len(ai_content)} 字符")
-                    
+
                     if ai_content:
                         # 检查内容是否为空，如果为空则抛出异常触发重试
                         if not ai_content.strip():
@@ -1809,8 +1998,8 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                                 'model_used': model_name,
                                 'user_type': user_type_desc,
                                 'processing_method': 'single_turn_with_retry',
-                                'attempt': attempt + 1
-                            }
+                                'attempt': attempt + 1,
+                            },
                         }
                     else:
                         logger.warning("⚠️ AI返回内容为空，触发重试")
@@ -1819,6 +2008,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                     logger.warning(f"❌ AI处理失败 (尝试 {attempt + 1}/{max_retries})")
                     if attempt < max_retries - 1:
                         import asyncio
+
                         wait_time = (attempt + 1) * 2  # 递增等待时间：2秒、4秒、6秒
                         logger.info(f"⏳ {wait_time}秒后重试...")
                         await asyncio.sleep(wait_time)
@@ -1830,6 +2020,7 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                 logger.error(f"❌ AI处理异常 (尝试 {attempt + 1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
                     import asyncio
+
                     wait_time = (attempt + 1) * 2
                     logger.info(f"⏳ {wait_time}秒后重试...")
                     await asyncio.sleep(wait_time)
@@ -1839,19 +2030,20 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                     logger.error(f"❌ AI处理失败，已重试 {max_retries} 次")
                     return {
                         'ai_analysis_report': self._generate_fallback_report(
-                            google_flights, kiwi_flights, ai_flights,
-                            departure_code, destination_code, user_preferences
+                            google_flights, kiwi_flights, ai_flights, departure_code, destination_code, user_preferences
                         ),
                         'summary': {
                             'markdown_format': True,
                             'model_used': 'fallback',
                             'user_type': user_type_desc if 'user_type_desc' in locals() else 'unknown',
                             'processing_method': 'fallback_report',
-                            'error': 'AI模型暂时不可用，已生成基础分析报告'
-                        }
+                            'error': 'AI模型暂时不可用，已生成基础分析报告',
+                        },
                     }
 
-    def _generate_fallback_report(self, google_flights, kiwi_flights, ai_flights, departure_code, destination_code, user_preferences):
+    def _generate_fallback_report(
+        self, google_flights, kiwi_flights, ai_flights, departure_code, destination_code, user_preferences
+    ):
         """生成降级报告，当AI处理失败时使用"""
         try:
             # 合并所有航班数据
@@ -1905,12 +2097,15 @@ You must strictly follow this key principle: The most successful Skiplagging opp
 请稍后重试以获得详细的AI分析和推荐。
 """
 
-    async def _call_ai_api(self, prompt: str, model_name: str = None, language: str = "zh", enable_fallback: bool = False) -> Dict:
+    async def _call_ai_api(
+        self, prompt: str, model_name: str = None, language: str = "zh", enable_fallback: bool = False
+    ) -> dict:
         """调用AI API进行数据处理，使用环境变量配置的模型"""
 
         # 使用环境变量配置的AI模型
         if model_name is None:
             from ..config.settings import AI_MODEL
+
             model_name = AI_MODEL
             payload_size = len(prompt.encode('utf-8'))
             logger.info(f"🤖 使用配置的AI模型: {model_name} (数据量: {payload_size:,}字节)")
@@ -1920,15 +2115,13 @@ You must strictly follow this key principle: The most successful Skiplagging opp
 
         # 确保总是返回字典格式
         if not isinstance(result, dict):
-            return {
-                'success': False,
-                'error': 'AI API调用失败',
-                'content': None
-            }
+            return {'success': False, 'error': 'AI API调用失败', 'content': None}
 
         return result
 
-    async def _try_ai_api_call_with_retry(self, prompt: str, model_name: str, language: str = "zh", max_retries: int = 3) -> Dict:
+    async def _try_ai_api_call_with_retry(
+        self, prompt: str, model_name: str, language: str = "zh", max_retries: int = 3
+    ) -> dict:
         """带重试机制的AI API调用"""
         import asyncio
 
@@ -1955,60 +2148,41 @@ You must strictly follow this key principle: The most successful Skiplagging opp
 
         # 所有重试都失败了
         logger.error(f"❌ AI API调用失败，已重试 {max_retries} 次")
-        return {
-            'success': False,
-            'error': f'AI API调用失败，已重试 {max_retries} 次',
-            'content': None
-        }
+        return {'success': False, 'error': f'AI API调用失败，已重试 {max_retries} 次', 'content': None}
 
-    async def _try_ai_api_call(self, prompt: str, model_name: str, language: str = "zh") -> Optional[Dict]:
+    async def _try_ai_api_call(self, prompt: str, model_name: str, language: str = "zh") -> dict | None:
         """尝试调用AI API"""
         try:
             import aiohttp
-            import os
-            from dotenv import load_dotenv
 
             # 从配置中获取 AI API 设置
             from ..config.settings import AI_API_KEY, AI_API_URL
+
             api_key = AI_API_KEY
             ai_api_url = AI_API_URL
 
             if not api_key:
                 error_msg = "AI API密钥未配置"
                 logger.error(error_msg)
-                return {
-                    'success': False,
-                    'error': error_msg,
-                    'content': None
-                }
+                return {'success': False, 'error': error_msg, 'content': None}
 
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
             # 获取优化的系统提示词V3（减少冗余，提高效率）
             from ..prompts.flight_processor_prompts_v2 import get_consolidated_instructions_prompt
+
             system_prompt = get_consolidated_instructions_prompt(language)
 
             payload = {
                 "model": model_name,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": system_prompt
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                "temperature": 0.2
+                "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
+                "temperature": 0.2,
                 # 移除max_tokens限制，充分利用Gemini 2.5 Flash的1M token上下文
             }
 
             # 记录请求数据大小
             import json
+
             payload_size = len(json.dumps(payload, ensure_ascii=False))
             prompt_size = len(prompt)
             logger.info(f"🚀 发送AI请求 - Payload大小: {payload_size:,} 字节, Prompt大小: {prompt_size:,} 字符")
@@ -2026,26 +2200,26 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                     f"{ai_api_url}/chat/completions",
                     headers=headers,
                     json=payload,
-                    timeout=aiohttp.ClientTimeout(total=300)  # 5分钟超时，为大量数据分析预留更多时间
+                    timeout=aiohttp.ClientTimeout(total=300),  # 5分钟超时，为大量数据分析预留更多时间
                 ) as response:
                     if response.status == 200:
                         result = await response.json()
-                        
+
                         # 调试：记录完整的AI响应结构
                         logger.debug(f"🔍 [调试] AI完整响应: {result}")
                         logger.debug(f"🔍 [调试] 响应键: {list(result.keys())}")
-                        
+
                         # 检查choices字段
                         if 'choices' not in result:
                             logger.error("❌ [调试] AI响应中没有'choices'字段")
                             return {'success': False, 'error': 'AI响应格式错误：缺少choices字段', 'content': None}
-                        
+
                         if not result['choices']:
                             logger.error("❌ [调试] AI响应choices字段为空")
                             return {'success': False, 'error': 'AI响应格式错误：choices为空', 'content': None}
-                        
+
                         logger.debug(f"🔍 [调试] choices[0]: {result['choices'][0]}")
-                        
+
                         content = result['choices'][0]['message']['content']
 
                         # 详细记录AI原始响应
@@ -2073,19 +2247,15 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                                 'summary': {
                                     'total_flights': 0,  # 将从markdown中解析
                                     'markdown_format': True,
-                                    'processing_method': 'markdown_only'
-                                }
+                                    'processing_method': 'markdown_only',
+                                },
                             }
 
                         except Exception as e:
                             error_msg = f"AI响应处理失败: {e}"
                             logger.error(error_msg)
                             logger.debug(f"AI原始响应长度: {len(content)} 字符")
-                            return {
-                                'success': False,
-                                'error': error_msg,
-                                'content': None
-                            }
+                            return {'success': False, 'error': error_msg, 'content': None}
                     else:
                         error_msg = f"AI API调用失败: {response.status}"
                         logger.error(error_msg)
@@ -2103,39 +2273,28 @@ You must strictly follow this key principle: The most successful Skiplagging opp
                             'error': error_msg,
                             'status_code': response.status,
                             'error_content': error_content,
-                            'content': None
+                            'content': None,
                         }
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             error_msg = "AI API调用超时 (5分钟)"
             logger.error(error_msg)
-            return {
-                'success': False,
-                'error': error_msg,
-                'content': None
-            }
+            return {'success': False, 'error': error_msg, 'content': None}
         except aiohttp.ClientError as e:
             error_msg = f"AI API网络连接错误: {e}"
             logger.error(error_msg)
-            return {
-                'success': False,
-                'error': error_msg,
-                'content': None
-            }
+            return {'success': False, 'error': error_msg, 'content': None}
         except Exception as e:
             error_msg = f"调用AI API异常: {type(e).__name__}: {e}"
             logger.error(error_msg)
             import traceback
+
             logger.debug(f"详细错误信息: {traceback.format_exc()}")
-            return {
-                'success': False,
-                'error': error_msg,
-                'content': None
-            }
+            return {'success': False, 'error': error_msg, 'content': None}
 
 
 # 全局服务实例
-_ai_flight_service: Optional[AIFlightService] = None
+_ai_flight_service: AIFlightService | None = None
 
 
 def get_ai_flight_service() -> AIFlightService:

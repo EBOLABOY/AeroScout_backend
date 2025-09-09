@@ -1,15 +1,14 @@
 """
 订阅相关路由：查看套餐、查看自己的订阅与配额/用量
 """
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 
-from fastapi_app.models.common import APIResponse
-from fastapi_app.models.auth import UserInfo
-from fastapi_app.models.subscription import SubscriptionOverview
 from fastapi_app.dependencies.auth import get_current_active_user
+from fastapi_app.models.auth import UserInfo
+from fastapi_app.models.common import APIResponse
 from fastapi_app.services.subscription_service import get_subscription_service
-
 
 router = APIRouter()
 
@@ -52,4 +51,3 @@ async def get_my_subscription(current_user: UserInfo = Depends(get_current_activ
     except Exception as e:
         logger.error(f"获取订阅信息失败: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取订阅信息失败")
-

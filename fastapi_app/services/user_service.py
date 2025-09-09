@@ -3,11 +3,11 @@ FastAPI 用户管理服务（与 Supabase Auth 协同）
 说明：密码相关能力已交由 Supabase Auth 负责，此处仅管理业务侧 profiles 数据。
 """
 
-from typing import Optional, List, Dict, Any
 from datetime import datetime
+from typing import Any
+
 from loguru import logger
 
-from fastapi_app.models.auth import UserInfo  # 保留类型提示用途
 from fastapi_app.services.supabase_service import get_supabase_service
 
 
@@ -23,7 +23,9 @@ class FastAPIUserService:
             self.db_service = await get_supabase_service()
         return self.db_service
 
-    async def create_user(self, username: str, email: str, password: str, is_admin: bool = False) -> Optional[Dict[str, Any]]:
+    async def create_user(
+        self, username: str, email: str, password: str, is_admin: bool = False
+    ) -> dict[str, Any] | None:
         """创建新用户档案（密码由 Supabase Auth 管理）。"""
         try:
             db_service = await self.get_db_service()
@@ -47,7 +49,7 @@ class FastAPIUserService:
                 'is_active': True,
                 'is_verified': False,
                 'email_verified': False,
-                'created_at': datetime.now()
+                'created_at': datetime.now(),
             }
 
             new_user = await db_service.create_user(user_data)
@@ -58,12 +60,12 @@ class FastAPIUserService:
             logger.error(f"用户创建失败: {e}")
             return None
 
-    async def authenticate_user(self, username_or_email: str, password: str) -> Optional[Dict[str, Any]]:
+    async def authenticate_user(self, username_or_email: str, password: str) -> dict[str, Any] | None:
         """验证用户登录（已由 Supabase Auth 负责）。"""
         logger.info("authenticate_user 已弃用：请使用 Supabase Auth")
         return None
 
-    async def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+    async def get_user_by_id(self, user_id: str) -> dict[str, Any] | None:
         try:
             db_service = await self.get_db_service()
             user_data = await db_service.get_profile_by_id(user_id)
@@ -76,7 +78,7 @@ class FastAPIUserService:
             logger.error(f"获取用户失败: {e}")
             return None
 
-    async def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
+    async def get_user_by_username(self, username: str) -> dict[str, Any] | None:
         try:
             db_service = await self.get_db_service()
             user_data = await db_service.get_profile_by_username(username)
@@ -94,7 +96,7 @@ class FastAPIUserService:
         logger.info("update_user_password 已弃用：请使用 Supabase Auth 管理密码")
         return False
 
-    async def update_user_info(self, user_id: str, **kwargs) -> Optional[Dict[str, Any]]:
+    async def update_user_info(self, user_id: str, **kwargs) -> dict[str, Any] | None:
         try:
             db_service = await self.get_db_service()
             user_data = await db_service.get_user_by_id(user_id)
@@ -103,8 +105,16 @@ class FastAPIUserService:
                 return None
 
             # 允许更新的字段
-            allowed_fields = ['email', 'full_name', 'phone', 'avatar_url', 'notification_enabled', 'email_notifications_enabled', 'pushplus_token']
-            update_data: Dict[str, Any] = {}
+            allowed_fields = [
+                'email',
+                'full_name',
+                'phone',
+                'avatar_url',
+                'notification_enabled',
+                'email_notifications_enabled',
+                'pushplus_token',
+            ]
+            update_data: dict[str, Any] = {}
             for field, value in kwargs.items():
                 if field in allowed_fields:
                     update_data[field] = value
@@ -142,23 +152,29 @@ class FastAPIUserService:
         db_service = await self.get_db_service()
         return await db_service.update_user(user_id, {'is_active': True})
 
-    async def search_users(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+    async def search_users(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         try:
             db_service = await self.get_db_service()
-            result = db_service.client.table('profiles').select('*').or_(
-                f"username.ilike.%{query}%,email.ilike.%{query}%"
-            ).limit(limit).execute()
+            result = (
+                db_service.client.table('profiles')
+                .select('*')
+                .or_(f"username.ilike.%{query}%,email.ilike.%{query}%")
+                .limit(limit)
+                .execute()
+            )
             return result.data or []
         except Exception as e:
             logger.error(f"搜索用户失败: {e}")
             return []
 
-    async def list_users(self, page: int = 1, per_page: int = 20) -> Dict[str, Any]:
+    async def list_users(self, page: int = 1, per_page: int = 20) -> dict[str, Any]:
         try:
             db_service = await self.get_db_service()
             offset = (page - 1) * per_page
 
-            users_result = db_service.client.table('profiles').select('*').range(offset, offset + per_page - 1).execute()
+            users_result = (
+                db_service.client.table('profiles').select('*').range(offset, offset + per_page - 1).execute()
+            )
             users = users_result.data or []
 
             total_result = db_service.client.table('profiles').select('id', count='exact').execute()
@@ -169,20 +185,22 @@ class FastAPIUserService:
                 "total": total,
                 "page": page,
                 "per_page": per_page,
-                "total_pages": (total + per_page - 1) // per_page
+                "total_pages": (total + per_page - 1) // per_page,
             }
         except Exception as e:
             logger.error(f"获取用户列表失败: {e}")
             return {"users": [], "total": 0, "page": page, "per_page": per_page, "total_pages": 0}
 
-    async def get_user_stats(self) -> Dict[str, Any]:
+    async def get_user_stats(self) -> dict[str, Any]:
         try:
             db_service = await self.get_db_service()
 
             total_users_result = db_service.client.table('profiles').select('id', count='exact').execute()
             total_users = total_users_result.count or 0
 
-            admin_users_result = db_service.client.table('profiles').select('id', count='exact').eq('is_admin', True).execute()
+            admin_users_result = (
+                db_service.client.table('profiles').select('id', count='exact').eq('is_admin', True).execute()
+            )
             admin_users = admin_users_result.count or 0
 
             return {
@@ -203,4 +221,3 @@ fastapi_user_service = FastAPIUserService()
 async def get_user_service() -> FastAPIUserService:
     """获取用户服务实例"""
     return fastapi_user_service
-

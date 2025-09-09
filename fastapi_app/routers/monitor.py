@@ -1,22 +1,25 @@
 """
 FastAPI监控任务路由
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from loguru import logger
-from typing import Optional, List
+
 from datetime import datetime
 
-from fastapi_app.models.common import APIResponse
-from fastapi_app.models.auth import UserInfo
-from fastapi_app.models.monitor import (
-    MonitorTaskCreate, MonitorTaskUpdate, MonitorTaskResponse,
-    MonitorTaskListResponse, MonitorSystemStatus, MonitorTaskStats
-)
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from loguru import logger
+
 from fastapi_app.dependencies.auth import get_current_active_user, optional_auth
-from fastapi_app.services.monitor_service import get_monitor_service, FastAPIMonitorService
-from fastapi_app.services.supabase_service import get_supabase_service
+from fastapi_app.models.auth import UserInfo
+from fastapi_app.models.common import APIResponse
+from fastapi_app.models.monitor import (
+    MonitorSystemStatus,
+    MonitorTaskCreate,
+    MonitorTaskListResponse,
+    MonitorTaskUpdate,
+)
 from fastapi_app.services.flight_service import get_flight_service
+from fastapi_app.services.monitor_service import FastAPIMonitorService, get_monitor_service
 from fastapi_app.services.subscription_service import get_subscription_service
+from fastapi_app.services.supabase_service import get_supabase_service
 
 # 创建路由器
 router = APIRouter()
@@ -27,111 +30,76 @@ async def health_check():
     """
     监控服务健康检查接口
     """
-    return APIResponse(
-        success=True,
-        message="监控服务正常",
-        data={"status": "healthy", "service": "monitor"}
-    )
+    return APIResponse(success=True, message="监控服务正常", data={"status": "healthy", "service": "monitor"})
 
 
 @router.get("/system/status", response_model=MonitorSystemStatus)
-async def get_system_status(
-    current_user: UserInfo = Depends(get_current_active_user)
-):
+async def get_system_status(current_user: UserInfo = Depends(get_current_active_user)):
     """
     获取监控系统状态
     """
     try:
         logger.info(f"用户 {current_user.username} 查询监控系统状态")
-        
+
         monitor_service = get_monitor_service()
         status = await monitor_service.get_system_status()
-        
+
         return status
-        
+
     except Exception as e:
         logger.error(f"获取监控系统状态失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="获取监控系统状态失败"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取监控系统状态失败")
 
 
 @router.post("/system/start", response_model=APIResponse)
-async def start_monitoring_system(
-    current_user: UserInfo = Depends(get_current_active_user)
-):
+async def start_monitoring_system(current_user: UserInfo = Depends(get_current_active_user)):
     """
     启动监控系统
     """
     try:
         logger.info(f"用户 {current_user.username} 启动监控系统")
-        
+
         monitor_service = get_monitor_service()
         success = await monitor_service.start_monitoring()
-        
+
         if success:
-            return APIResponse(
-                success=True,
-                message="监控系统启动成功",
-                data={"status": "started"}
-            )
+            return APIResponse(success=True, message="监控系统启动成功", data={"status": "started"})
         else:
-            return APIResponse(
-                success=False,
-                message="监控系统已在运行",
-                data={"status": "already_running"}
-            )
-        
+            return APIResponse(success=False, message="监控系统已在运行", data={"status": "already_running"})
+
     except Exception as e:
         logger.error(f"启动监控系统失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="启动监控系统失败"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="启动监控系统失败")
 
 
 @router.post("/system/stop", response_model=APIResponse)
-async def stop_monitoring_system(
-    current_user: UserInfo = Depends(get_current_active_user)
-):
+async def stop_monitoring_system(current_user: UserInfo = Depends(get_current_active_user)):
     """
     停止监控系统
     """
     try:
         logger.info(f"用户 {current_user.username} 停止监控系统")
-        
+
         monitor_service = get_monitor_service()
         success = await monitor_service.stop_monitoring()
-        
+
         if success:
-            return APIResponse(
-                success=True,
-                message="监控系统停止成功",
-                data={"status": "stopped"}
-            )
+            return APIResponse(success=True, message="监控系统停止成功", data={"status": "stopped"})
         else:
-            return APIResponse(
-                success=False,
-                message="监控系统未在运行",
-                data={"status": "not_running"}
-            )
-        
+            return APIResponse(success=False, message="监控系统未在运行", data={"status": "not_running"})
+
     except Exception as e:
         logger.error(f"停止监控系统失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="停止监控系统失败"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="停止监控系统失败")
 
 
 @router.get("/tasks", response_model=MonitorTaskListResponse)
 async def get_monitor_tasks(
     page: int = Query(1, description="页码", ge=1),
     page_size: int = Query(10, description="每页大小", ge=1, le=100),
-    is_active: Optional[bool] = Query(None, description="是否只显示活跃任务"),
+    is_active: bool | None = Query(None, description="是否只显示活跃任务"),
     current_user: UserInfo = Depends(get_current_active_user),
-    monitor_service: FastAPIMonitorService = Depends(get_monitor_service)
+    monitor_service: FastAPIMonitorService = Depends(get_monitor_service),
 ):
     """
     获取用户的监控任务列表 - Supabase认证
@@ -148,12 +116,12 @@ async def get_monitor_tasks(
                     "page": result['page'],
                     "page_size": result['page_size'],
                     "total": result['total'],
-                    "total_pages": result['total_pages']
-                }
+                    "total_pages": result['total_pages'],
+                },
             },
             total=result['total'],
             page=result['page'],
-            page_size=result['page_size']
+            page_size=result['page_size'],
         )
     except Exception as e:
         logger.error(f"获取监控任务列表失败: {e}")
@@ -161,10 +129,7 @@ async def get_monitor_tasks(
 
 
 @router.post("/tasks", response_model=APIResponse)
-async def create_monitor_task(
-    task_data: MonitorTaskCreate,
-    current_user: UserInfo = Depends(get_current_active_user)
-):
+async def create_monitor_task(task_data: MonitorTaskCreate, current_user: UserInfo = Depends(get_current_active_user)):
     """
     创建监控任务 - Supabase认证
     """
@@ -206,7 +171,7 @@ async def create_monitor_task(
             "pushplus_notification": getattr(task_data, 'pushplus_notification', True),
             "pushplus_token": getattr(task_data, 'pushplus_token', None),
             "blacklist_cities": getattr(task_data, 'blacklist_cities', None),
-            "blacklist_countries": getattr(task_data, 'blacklist_countries', None)
+            "blacklist_countries": getattr(task_data, 'blacklist_countries', None),
         }
 
         # 订阅与配额：限制活跃任务数量
@@ -218,7 +183,7 @@ async def create_monitor_task(
             if active_count >= max_active:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"已达到套餐限制的活跃监控任务数量（{max_active} 个）。请停用部分任务或升级套餐。"
+                    detail=f"已达到套餐限制的活跃监控任务数量（{max_active} 个）。请停用部分任务或升级套餐。",
                 )
 
         # 保存到数据库
@@ -230,34 +195,24 @@ async def create_monitor_task(
             return APIResponse(
                 success=True,
                 message="监控任务创建成功",
-                data={
-                    "task_id": created_task['id'],
-                    "name": created_task['task_name'],
-                    "status": "created"
-                }
+                data={"task_id": created_task['id'], "name": created_task['task_name'], "status": "created"},
             )
         else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="数据库保存失败"
-            )
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="数据库保存失败")
 
     except HTTPException:
         # 直接抛出以保留具体的状态码（例如配额超限403）
         raise
     except Exception as e:
         logger.error(f"创建监控任务失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="创建监控任务失败"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="创建监控任务失败")
 
 
 @router.get("/tasks/{task_id}", response_model=APIResponse)
 async def get_monitor_task(
     task_id: str,
     current_user: UserInfo = Depends(get_current_active_user),
-    monitor_service: FastAPIMonitorService = Depends(get_monitor_service)
+    monitor_service: FastAPIMonitorService = Depends(get_monitor_service),
 ):
     """
     获取单个监控任务详情
@@ -278,9 +233,7 @@ async def get_monitor_task(
 
 @router.put("/tasks/{task_id}", response_model=APIResponse)
 async def update_monitor_task(
-    task_id: str,
-    task_data: MonitorTaskUpdate,
-    current_user: UserInfo = Depends(get_current_active_user)
+    task_id: str, task_data: MonitorTaskUpdate, current_user: UserInfo = Depends(get_current_active_user)
 ):
     """
     更新监控任务
@@ -332,33 +285,20 @@ async def update_monitor_task(
 
         if success:
             logger.info(f"监控任务更新成功: {task_id}")
-            return APIResponse(
-                success=True,
-                message="监控任务更新成功",
-                data={
-                    "task_id": task_id,
-                    "status": "updated"
-                }
-            )
+            return APIResponse(success=True, message="监控任务更新成功", data={"task_id": task_id, "status": "updated"})
         else:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="监控任务不存在或更新失败"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="监控任务不存在或更新失败")
 
     except Exception as e:
         logger.error(f"更新监控任务失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="更新监控任务失败"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="更新监控任务失败")
 
 
 @router.delete("/tasks/{task_id}", response_model=APIResponse)
 async def delete_monitor_task(
     task_id: str,
     current_user: UserInfo = Depends(get_current_active_user),
-    monitor_service: FastAPIMonitorService = Depends(get_monitor_service)
+    monitor_service: FastAPIMonitorService = Depends(get_monitor_service),
 ):
     """
     删除监控任务
@@ -376,10 +316,7 @@ async def delete_monitor_task(
 
 
 @router.get("/tasks/{task_id}/flights", response_model=APIResponse)
-async def get_task_flight_results(
-    task_id: str,
-    current_user: UserInfo = Depends(get_current_active_user)
-):
+async def get_task_flight_results(task_id: str, current_user: UserInfo = Depends(get_current_active_user)):
     """
     获取监控任务的航班搜索结果
     """
@@ -391,17 +328,11 @@ async def get_task_flight_results(
         task = result.data[0] if result.data else None
 
         if not task:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="监控任务不存在"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="监控任务不存在")
 
         # 检查任务是否属于当前用户
         if task.get('user_id') != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="无权访问此监控任务"
-            )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问此监控任务")
 
         # 获取航班搜索服务
         flight_service = get_flight_service()
@@ -413,7 +344,7 @@ async def get_task_flight_results(
             monitor_data = await flight_service.get_monitor_data_async(
                 city_code=task['departure_code'],
                 depart_date=task.get('depart_date'),
-                return_date=task.get('return_date')
+                return_date=task.get('return_date'),
             )
 
             if monitor_data['success']:
@@ -442,8 +373,8 @@ async def get_task_flight_results(
                         "destination": "全球目的地",
                         "stats": monitor_data.get('data', {}).get('stats', {}),
                         "city_name": monitor_data.get('data', {}).get('city_name', ''),
-                        "city_flag": monitor_data.get('data', {}).get('city_flag', '')
-                    }
+                        "city_flag": monitor_data.get('data', {}).get('city_flag', ''),
+                    },
                 )
             else:
                 return APIResponse(
@@ -455,8 +386,8 @@ async def get_task_flight_results(
                         "filtered_flights": [],
                         "total_flights": 0,
                         "low_price_flights": 0,
-                        "error": monitor_data.get('error', '未知错误')
-                    }
+                        "error": monitor_data.get('error', '未知错误'),
+                    },
                 )
         else:
             # 有指定目的地，直接搜索
@@ -465,7 +396,7 @@ async def get_task_flight_results(
                 destination_code=destination_code,
                 depart_date=task['depart_date'],
                 return_date=task.get('return_date'),
-                adults=1
+                adults=1,
             )
 
             if search_result['success']:
@@ -491,8 +422,8 @@ async def get_task_flight_results(
                         "price_threshold": price_threshold,
                         "search_type": "direct_search",
                         "departure_city": task['departure_code'],
-                        "destination": destination_code
-                    }
+                        "destination": destination_code,
+                    },
                 )
             else:
                 return APIResponse(
@@ -504,25 +435,19 @@ async def get_task_flight_results(
                         "filtered_flights": [],
                         "total_flights": 0,
                         "low_price_flights": 0,
-                        "error": search_result.get('error', '航班搜索失败')
-                    }
+                        "error": search_result.get('error', '航班搜索失败'),
+                    },
                 )
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"获取监控任务航班结果失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="获取监控任务航班结果失败"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取监控任务航班结果失败")
 
 
 @router.post("/tasks/{task_id}/execute", response_model=APIResponse)
-async def execute_monitor_task(
-    task_id: int,
-    current_user: UserInfo = Depends(get_current_active_user)
-):
+async def execute_monitor_task(task_id: int, current_user: UserInfo = Depends(get_current_active_user)):
     """
     手动执行监控任务
     """
@@ -535,25 +460,16 @@ async def execute_monitor_task(
         return APIResponse(
             success=True,
             message="监控任务执行成功",
-            data={
-                "task_id": task_id,
-                "status": "executed",
-                "execution_time": "2025-01-16T10:00:00Z"
-            }
+            data={"task_id": task_id, "status": "executed", "execution_time": "2025-01-16T10:00:00Z"},
         )
 
     except Exception as e:
         logger.error(f"执行监控任务失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="执行监控任务失败"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="执行监控任务失败")
 
 
 @router.get("/cities", response_model=APIResponse)
-async def get_monitor_cities(
-    current_user: Optional[UserInfo] = Depends(optional_auth)
-):
+async def get_monitor_cities(current_user: UserInfo | None = Depends(optional_auth)):
     """
     获取监控页面支持的城市列表 (允许游客访问)
     """
@@ -563,54 +479,21 @@ async def get_monitor_cities(
 
         # 支持的城市列表
         cities = [
-            {
-                "code": "HKG",
-                "name": "香港",
-                "name_en": "Hong Kong",
-                "flag": "🇭🇰",
-                "timezone": "Asia/Hong_Kong"
-            },
-            {
-                "code": "SZX",
-                "name": "深圳",
-                "name_en": "Shenzhen",
-                "flag": "🇨🇳",
-                "timezone": "Asia/Shanghai"
-            },
-            {
-                "code": "CAN",
-                "name": "广州",
-                "name_en": "Guangzhou",
-                "flag": "🇨🇳",
-                "timezone": "Asia/Shanghai"
-            },
-            {
-                "code": "MFM",
-                "name": "澳门",
-                "name_en": "Macau",
-                "flag": "🇲🇴",
-                "timezone": "Asia/Macau"
-            }
+            {"code": "HKG", "name": "香港", "name_en": "Hong Kong", "flag": "🇭🇰", "timezone": "Asia/Hong_Kong"},
+            {"code": "SZX", "name": "深圳", "name_en": "Shenzhen", "flag": "🇨🇳", "timezone": "Asia/Shanghai"},
+            {"code": "CAN", "name": "广州", "name_en": "Guangzhou", "flag": "🇨🇳", "timezone": "Asia/Shanghai"},
+            {"code": "MFM", "name": "澳门", "name_en": "Macau", "flag": "🇲🇴", "timezone": "Asia/Macau"},
         ]
 
-        return APIResponse(
-            success=True,
-            message="获取城市列表成功",
-            data={"cities": cities}
-        )
+        return APIResponse(success=True, message="获取城市列表成功", data={"cities": cities})
 
     except Exception as e:
         logger.error(f"获取监控城市列表失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="获取城市列表失败"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取城市列表失败")
 
 
 @router.get("/dates", response_model=APIResponse)
-async def get_monitor_dates(
-    current_user: Optional[UserInfo] = Depends(optional_auth)
-):
+async def get_monitor_dates(current_user: UserInfo | None = Depends(optional_auth)):
     """
     获取监控日期设置 (允许游客访问)
     """
@@ -632,14 +515,16 @@ async def get_monitor_dates(
 
         for i in range(30):
             date = today + timedelta(days=i)
-            dates.append({
-                "date": date.isoformat(),
-                "display": date.strftime("%m月%d日"),
-                "display_en": date.strftime("%b %d"),
-                "weekday": date.strftime("%A"),
-                "weekday_zh": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][date.weekday()],
-                "is_weekend": date.weekday() >= 5
-            })
+            dates.append(
+                {
+                    "date": date.isoformat(),
+                    "display": date.strftime("%m月%d日"),
+                    "display_en": date.strftime("%b %d"),
+                    "weekday": date.strftime("%A"),
+                    "weekday_zh": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][date.weekday()],
+                    "is_weekend": date.weekday() >= 5,
+                }
+            )
 
         return APIResponse(
             success=True,
@@ -648,23 +533,17 @@ async def get_monitor_dates(
                 "departure_date": departure_date,
                 "return_date": return_date,
                 "trip_type": "往返" if trip_type == 2 else "单程",
-                "dates": dates
-            }
+                "dates": dates,
+            },
         )
 
     except Exception as e:
         logger.error(f"获取监控日期设置失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="获取监控日期失败"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取监控日期失败")
 
 
 @router.post("/refresh", response_model=APIResponse)
-async def refresh_monitor_data(
-    request_data: dict,
-    current_user: Optional[UserInfo] = Depends(optional_auth)
-):
+async def refresh_monitor_data(request_data: dict, current_user: UserInfo | None = Depends(optional_auth)):
     """
     刷新监控数据 (允许游客访问)
     """
@@ -678,16 +557,14 @@ async def refresh_monitor_data(
         if city not in supported_cities:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f'不支持的城市代码: {city}，支持的城市: {", ".join(supported_cities)}'
+                detail=f'不支持的城市代码: {city}，支持的城市: {", ".join(supported_cities)}',
             )
 
         # 获取航班搜索服务
         flight_service = get_flight_service()
 
         # 执行数据刷新（使用Trip.com API）
-        result = await flight_service.get_monitor_data_async(
-            city_code=city
-        )
+        result = await flight_service.get_monitor_data_async(city_code=city)
 
         if result.get('success'):
             logger.info(f"监控数据刷新成功: {city}")
@@ -697,15 +574,13 @@ async def refresh_monitor_data(
                 data={
                     "city": city,
                     "lastUpdate": datetime.now().isoformat(),
-                    "flights_count": len(result.get('flights', []))
-                }
+                    "flights_count": len(result.get('flights', [])),
+                },
             )
         else:
             logger.warning(f"监控数据刷新失败: {result.get('error', '未知错误')}")
             return APIResponse(
-                success=False,
-                message=f"数据刷新失败: {result.get('error', '未知错误')}",
-                data={"city": city}
+                success=False, message=f"数据刷新失败: {result.get('error', '未知错误')}", data={"city": city}
             )
 
     except HTTPException:
@@ -713,20 +588,17 @@ async def refresh_monitor_data(
         raise
     except Exception as e:
         logger.error(f"刷新监控数据失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="刷新数据失败"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="刷新数据失败")
 
 
 @router.get("/data")
 async def get_monitor_data(
     city: str = Query(..., description="城市代码"),
-    blacklist_cities: Optional[str] = Query(None, description="黑名单城市，逗号分隔"),
-    blacklist_countries: Optional[str] = Query(None, description="黑名单国家，逗号分隔"),
-    depart_date: Optional[str] = Query(None, description="出发日期(YYYY-MM-DD)"),
-    return_date: Optional[str] = Query(None, description="返程日期(YYYY-MM-DD)"),
-    current_user: Optional[UserInfo] = Depends(optional_auth)
+    blacklist_cities: str | None = Query(None, description="黑名单城市，逗号分隔"),
+    blacklist_countries: str | None = Query(None, description="黑名单国家，逗号分隔"),
+    depart_date: str | None = Query(None, description="出发日期(YYYY-MM-DD)"),
+    return_date: str | None = Query(None, description="返程日期(YYYY-MM-DD)"),
+    current_user: UserInfo | None = Depends(optional_auth),
 ):
     """
     获取监控页面数据 (允许游客访问)
@@ -742,7 +614,7 @@ async def get_monitor_data(
         if city.upper() not in supported_cities:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f'不支持的城市代码: {city}，支持的城市: {", ".join(supported_cities)}'
+                detail=f'不支持的城市代码: {city}，支持的城市: {", ".join(supported_cities)}',
             )
 
         # 处理黑名单参数
@@ -753,7 +625,9 @@ async def get_monitor_data(
             blacklist_cities_list = [city.strip() for city in blacklist_cities.split(',') if city.strip()]
 
         if blacklist_countries:
-            blacklist_countries_list = [country.strip() for country in blacklist_countries.split(',') if country.strip()]
+            blacklist_countries_list = [
+                country.strip() for country in blacklist_countries.split(',') if country.strip()
+            ]
 
         # 获取航班搜索服务
         flight_service = get_flight_service()
@@ -764,7 +638,7 @@ async def get_monitor_data(
             blacklist_cities=blacklist_cities_list,
             blacklist_countries=blacklist_countries_list,
             depart_date=depart_date,
-            return_date=return_date
+            return_date=return_date,
         )
 
         logger.info(f"监控数据获取完成: 成功={result['success']}, 航班数={len(result.get('flights', []))}")
@@ -779,8 +653,8 @@ async def get_monitor_data(
                     'stats': result.get('stats', {}),
                     'lastUpdate': result.get('lastUpdate', ''),
                     'city_name': result.get('city_name', ''),
-                    'city_flag': result.get('city_flag', '')
-                }
+                    'city_flag': result.get('city_flag', ''),
+                },
             )
         else:
             return APIResponse(
@@ -791,8 +665,8 @@ async def get_monitor_data(
                     'stats': {'total': 0, 'lowPrice': 0, 'minPrice': 0},
                     'lastUpdate': '',
                     'city_name': '',
-                    'city_flag': ''
-                }
+                    'city_flag': '',
+                },
             )
 
     except HTTPException:
@@ -808,6 +682,6 @@ async def get_monitor_data(
                 'stats': {'total': 0, 'lowPrice': 0, 'minPrice': 0},
                 'lastUpdate': '',
                 'city_name': city,
-                'city_flag': '🏙️'
-            }
+                'city_flag': '🏙️',
+            },
         )

@@ -2,18 +2,16 @@
 认证依赖：切换为被动验证 Supabase JWT
 """
 
-from typing import Optional
 from datetime import datetime
 
 import jwt
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
 
 from fastapi_app.config import settings
 from fastapi_app.models.auth import UserInfo
 from fastapi_app.services.supabase_service import get_supabase_service
-
 
 security = HTTPBearer()
 optional_security = HTTPBearer(auto_error=False)
@@ -74,8 +72,8 @@ async def get_current_active_user(current_user: UserInfo = Depends(get_current_u
 
 
 async def optional_auth(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security),
-) -> Optional[UserInfo]:
+    credentials: HTTPAuthorizationCredentials | None = Depends(optional_security),
+) -> UserInfo | None:
     """可选认证 - 允许匿名访问"""
     if credentials is None:
         return None
@@ -101,4 +99,3 @@ class SecurityConfig:
     @classmethod
     def validate_username(cls, username: str) -> bool:
         return cls.MIN_USERNAME_LENGTH <= len(username) <= cls.MAX_USERNAME_LENGTH
-

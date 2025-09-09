@@ -6,17 +6,14 @@
 3. 监控任务执行
 4. 价格监控功能
 """
-import asyncio
-import os
-import hashlib
-import json
-import platform
-import requests
-import copy
-from datetime import datetime
-from typing import List, Dict, Optional, Any
-from loguru import logger
 
+import asyncio
+import json
+import os
+from datetime import datetime
+
+import requests
+from loguru import logger
 
 from fastapi_app.services.cache_service import get_cache_service
 
@@ -35,7 +32,7 @@ class MonitorFlightService:
             'successful_requests': 0,
             'failed_requests': 0,
             'cache_hits': 0,
-            'cache_misses': 0
+            'cache_misses': 0,
         }
 
     async def _get_cache_service(self):
@@ -44,11 +41,14 @@ class MonitorFlightService:
             self.cache_service = await get_cache_service()
         return self.cache_service
 
-    async def get_monitor_data_async(self, city_code: str,
-                                   blacklist_cities: List[str] = None,
-                                   blacklist_countries: List[str] = None,
-                                   depart_date: str = None,
-                                   return_date: str = None) -> dict:
+    async def get_monitor_data_async(
+        self,
+        city_code: str,
+        blacklist_cities: list[str] = None,
+        blacklist_countries: list[str] = None,
+        depart_date: str = None,
+        return_date: str = None,
+    ) -> dict:
         """
         获取监控页面数据 - 使用Trip.com API
 
@@ -68,11 +68,12 @@ class MonitorFlightService:
 
             # 检查是否明确传递了日期参数
             import inspect
+
             frame = inspect.currentframe()
             args, _, _, values = inspect.getargvalues(frame)
 
             # 判断是否明确传递了 depart_date 和 return_date 参数
-            has_depart_param = 'depart_date' in values and values['depart_date'] is not None
+            'depart_date' in values and values['depart_date'] is not None
             has_return_param = 'return_date' in values
 
             # 使用传入的日期，如果没有则从环境变量获取
@@ -127,7 +128,7 @@ class MonitorFlightService:
                     'flights': [],
                     'stats': {'total': 0, 'lowPrice': 0, 'minPrice': 0},
                     'city_name': city_code,
-                    'city_flag': '🏙️'
+                    'city_flag': '🏙️',
                 }
 
             # 应用黑名单过滤
@@ -138,7 +139,9 @@ class MonitorFlightService:
                 # 打印前几个航班的目的地和国家信息用于调试
                 if flights:
                     for i, flight in enumerate(flights[:3]):
-                        logger.info(f"航班 {i+1}: 目的地='{flight.get('目的地', 'N/A')}', 国家='{flight.get('国家', 'N/A')}', destination='{flight.get('destination', 'N/A')}', country='{flight.get('country', 'N/A')}'")
+                        logger.info(
+                            f"航班 {i+1}: 目的地='{flight.get('目的地', 'N/A')}', 国家='{flight.get('国家', 'N/A')}', destination='{flight.get('destination', 'N/A')}', country='{flight.get('country', 'N/A')}'"
+                        )
 
                 flights = self._apply_blacklist_filter(flights, blacklist_cities, blacklist_countries)
                 logger.info(f"黑名单过滤: {original_count} → {len(flights)} 个航班")
@@ -164,11 +167,11 @@ class MonitorFlightService:
                 'stats': {
                     'total': total_flights,
                     'lowPrice': 0,  # 这里可以根据需要计算低价航班数量
-                    'minPrice': min_price
+                    'minPrice': min_price,
                 },
                 'lastUpdate': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'city_name': city_info['name'],
-                'city_flag': city_info['flag']
+                'city_flag': city_info['flag'],
             }
 
             # 缓存结果数据（缓存30分钟）
@@ -187,7 +190,7 @@ class MonitorFlightService:
                 'flights': [],
                 'stats': {'total': 0, 'lowPrice': 0, 'minPrice': 0},
                 'city_name': city_code,
-                'city_flag': '🏙️'
+                'city_flag': '🏙️',
             }
 
     async def clear_flight_cache(self, city_code: str = None):
@@ -219,12 +222,14 @@ class MonitorFlightService:
             'cache_misses': self.stats['cache_misses'],
             'cache_hit_rate': (
                 self.stats['cache_hits'] / (self.stats['cache_hits'] + self.stats['cache_misses'])
-                if (self.stats['cache_hits'] + self.stats['cache_misses']) > 0 else 0
-            )
+                if (self.stats['cache_hits'] + self.stats['cache_misses']) > 0
+                else 0
+            ),
         }
 
-    async def fetch_trip_flights(self, departure_code: str, destination_code: str = None,
-                               depart_date: str = None, return_date: str = None) -> List[dict]:
+    async def fetch_trip_flights(
+        self, departure_code: str, destination_code: str = None, depart_date: str = None, return_date: str = None
+    ) -> list[dict]:
         """
         从Trip.com获取航班数据
 
@@ -249,11 +254,7 @@ class MonitorFlightService:
 
             # 在线程池中执行同步请求
             loop = asyncio.get_event_loop()
-            response_data = await loop.run_in_executor(
-                None,
-                self._sync_trip_request,
-                url, headers, payload
-            )
+            response_data = await loop.run_in_executor(None, self._sync_trip_request, url, headers, payload)
 
             if response_data:
                 # 清洗数据
@@ -317,11 +318,12 @@ class MonitorFlightService:
             'cookieorigin': 'https://hk.trip.com',
             'currency': 'CNY',
             'locale': 'zh-HK',
-            'priority': 'u=1, i'
+            'priority': 'u=1, i',
         }
 
-    def _update_trip_payload(self, departure_code: str, destination_code: str = None,
-                           depart_date: str = None, return_date: str = None) -> dict:
+    def _update_trip_payload(
+        self, departure_code: str, destination_code: str = None, depart_date: str = None, return_date: str = None
+    ) -> dict:
         """更新Trip.com API请求payload - 基于GitHub项目的正确格式"""
         # 生成动态参数
         current_time = datetime.now()
@@ -339,12 +341,7 @@ class MonitorFlightService:
             "ptoken": "",
             "route": 1,
             "segments": [],
-            "filters": [
-                {
-                    "type": 18,
-                    "code": "1,0,0"
-                }
-            ],
+            "filters": [{"type": 18, "code": "1,0,0"}],
             "tripDays": [],
             "leaveDay": 0,
             "vaccine": False,
@@ -386,14 +383,14 @@ class MonitorFlightService:
                     {"name": "Language", "value": "hk"},
                     {"name": "fromVersion", "value": "2"},
                     {"name": "frontVersion", "value": "2"},
-                    {"name": "SourceApp", "value": "Trip"}
+                    {"name": "SourceApp", "value": "Trip"},
                 ],
                 "Locale": "zh-HK",
                 "Language": "hk",
                 "Currency": "CNY",
                 "ClientID": "",
-                "appid": "700020"
-            }
+                "appid": "700020",
+            },
         }
 
         # 构建 segments
@@ -401,49 +398,30 @@ class MonitorFlightService:
             "dcl": [],
             "acl": [],
             "dow": [],
-            "dcs": [
-                {
-                    "ct": 1,
-                    "code": departure_code
-                }
-            ],
+            "dcs": [{"ct": 1, "code": departure_code}],
             "acs": [
                 {
                     "ct": 6,
-                    "code": "bd_49_29"  # 境外目的地区域代码
+                    "code": "bd_49_29",  # 境外目的地区域代码
                 }
             ],
-            "drl": [
-                {
-                    "begin": depart_date or "2025-09-30",
-                    "end": depart_date or "2025-09-30"
-                }
-            ]
+            "drl": [{"begin": depart_date or "2025-09-30", "end": depart_date or "2025-09-30"}],
         }
 
         # 只有往返票才添加返程日期
         if return_date is not None:
-            segment["rdrl"] = [
-                {
-                    "begin": return_date,
-                    "end": return_date
-                }
-            ]
+            segment["rdrl"] = [{"begin": return_date, "end": return_date}]
 
         # 如果指定了目的地，更新目的地设置
         if destination_code:
-            segment["acs"] = [
-                {
-                    "ct": 1,
-                    "code": destination_code
-                }
-            ]
+            segment["acs"] = [{"ct": 1, "code": destination_code}]
 
         base_payload["segments"] = [segment]
         return base_payload
 
-    def _apply_blacklist_filter(self, flights: List[dict], blacklist_cities: List[str] = None,
-                              blacklist_countries: List[str] = None) -> List[dict]:
+    def _apply_blacklist_filter(
+        self, flights: list[dict], blacklist_cities: list[str] = None, blacklist_countries: list[str] = None
+    ) -> list[dict]:
         """应用黑名单过滤"""
         filtered_flights = flights
 
@@ -463,12 +441,13 @@ class MonitorFlightService:
                     blacklist_cities_normalized.append("臺灣")
 
             filtered_flights = [
-                flight for flight in filtered_flights
+                flight
+                for flight in filtered_flights
                 if not any(
-                    blacklist_city in flight.get('目的地', '') or
-                    blacklist_city in flight.get('destination', '') or
-                    blacklist_city in flight.get('country', '') or
-                    blacklist_city in flight.get('国家', '')
+                    blacklist_city in flight.get('目的地', '')
+                    or blacklist_city in flight.get('destination', '')
+                    or blacklist_city in flight.get('country', '')
+                    or blacklist_city in flight.get('国家', '')
                     for blacklist_city in blacklist_cities_normalized
                 )
             ]
@@ -489,12 +468,13 @@ class MonitorFlightService:
                     blacklist_countries_normalized.append("臺灣")
 
             filtered_flights = [
-                flight for flight in filtered_flights
+                flight
+                for flight in filtered_flights
                 if not any(
-                    blacklist_country in flight.get('国家', '') or
-                    blacklist_country in flight.get('country', '') or
-                    blacklist_country in flight.get('目的地', '') or
-                    blacklist_country in flight.get('destination', '')
+                    blacklist_country in flight.get('国家', '')
+                    or blacklist_country in flight.get('country', '')
+                    or blacklist_country in flight.get('目的地', '')
+                    or blacklist_country in flight.get('destination', '')
                     for blacklist_country in blacklist_countries_normalized
                 )
             ]
@@ -514,7 +494,7 @@ class MonitorFlightService:
         }
         return city_map.get(city_code, {'name': city_code, 'flag': '🏙️'})
 
-    def _clean_trip_flight_data(self, response_data: dict) -> List[dict]:
+    def _clean_trip_flight_data(self, response_data: dict) -> list[dict]:
         """清洗Trip.com API返回的航班数据"""
         try:
             flights = []
@@ -613,7 +593,7 @@ class MonitorFlightService:
                 'HISTORY': '历史古迹',
                 'NIGHTLIFE': '夜生活',
                 'FAMILY': '亲子游',
-                'ROMANTIC': '浪漫之旅'
+                'ROMANTIC': '浪漫之旅',
             }
             for theme_code in theme_codes:
                 theme_name = theme_mapping.get(theme_code, theme_code.replace('_', ' ').title())
@@ -646,7 +626,6 @@ class MonitorFlightService:
                 'hotScore': hot_score,
                 'tags': tags_str,
                 'isInternational': is_international,
-
                 # 新增的丰富信息字段
                 'priceChange': price_change,
                 'priceChangePercent': price_change_percent,
@@ -660,7 +639,6 @@ class MonitorFlightService:
                 'latitude': latitude,
                 'longitude': longitude,
                 'timezoneOffset': timezone_offset,
-
                 # 兼容旧版本的中文字段名（保持向后兼容）
                 '目的地': arrival_city_name,
                 '代码': arrival_city_code,
@@ -674,14 +652,13 @@ class MonitorFlightService:
                 '图片链接': image_url,
                 '预订链接': full_jump_url,
                 'is_international': is_international,
-
                 # 为原始API数据添加缺失的字段，以兼容模板
                 '飞行时长': '查看详情',  # 原始API不提供飞行时长
                 '航空公司': '查看详情',  # 原始API不提供航空公司信息
                 '航班号': '查看详情',  # 原始API不提供航班号
                 '出发时间': '查看详情',  # 原始API不提供具体时间
                 '到达时间': '查看详情',  # 原始API不提供具体时间
-                '链接': full_jump_url
+                '链接': full_jump_url,
             }
 
             return flight_info
@@ -692,7 +669,7 @@ class MonitorFlightService:
 
 
 # 全局服务实例
-_monitor_flight_service: Optional[MonitorFlightService] = None
+_monitor_flight_service: MonitorFlightService | None = None
 
 
 def get_monitor_flight_service() -> MonitorFlightService:
@@ -701,6 +678,7 @@ def get_monitor_flight_service() -> MonitorFlightService:
     if _monitor_flight_service is None:
         _monitor_flight_service = MonitorFlightService()
     return _monitor_flight_service
+
 
 # 保持向后兼容性
 def get_flight_service() -> MonitorFlightService:

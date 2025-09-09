@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Export existing app users (profiles/users) to a Supabase Auth import file.
 
@@ -14,14 +13,17 @@ Requirements:
   - env SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
   - pip install supabase python-dotenv bcrypt
 """
-import os
-import json
+
 import csv
+import json
+import os
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
-from datetime import datetime, timezone
-from dotenv import load_dotenv
+
 import bcrypt
+from dotenv import load_dotenv
+
 from supabase import create_client
 
 
@@ -30,7 +32,7 @@ def iso(dt):
         return None
     if isinstance(dt, str):
         return dt
-    return dt.astimezone(timezone.utc).isoformat()
+    return dt.astimezone(UTC).isoformat()
 
 
 def main():
@@ -89,22 +91,16 @@ def main():
             'role': 'authenticated',
             'email': email,
             'encrypted_password': encrypted_password,
-            'email_confirmed_at': iso(datetime.now(timezone.utc)) if email_verified else None,
+            'email_confirmed_at': iso(datetime.now(UTC)) if email_verified else None,
             'invited_at': None,
             'phone': None,
             'confirmed_at': None,
             'last_sign_in_at': None,
-            'app_metadata': {
-                'provider': 'email',
-                'providers': ['email']
-            },
-            'user_metadata': {
-                'username': username,
-                'is_admin': bool(p.get('is_admin', False))
-            },
-            'created_at': created_at or iso(datetime.now(timezone.utc)),
-            'updated_at': updated_at or iso(datetime.now(timezone.utc)),
-            'identities': []
+            'app_metadata': {'provider': 'email', 'providers': ['email']},
+            'user_metadata': {'username': username, 'is_admin': bool(p.get('is_admin', False))},
+            'created_at': created_at or iso(datetime.now(UTC)),
+            'updated_at': updated_at or iso(datetime.now(UTC)),
+            'identities': [],
         }
         users.append(user_obj)
 
@@ -113,21 +109,32 @@ def main():
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
     # CSV (best-effort subset)
-    csv_fields = ['id', 'email', 'encrypted_password', 'email_confirmed_at', 'created_at', 'updated_at', 'user_metadata', 'app_metadata']
+    csv_fields = [
+        'id',
+        'email',
+        'encrypted_password',
+        'email_confirmed_at',
+        'created_at',
+        'updated_at',
+        'user_metadata',
+        'app_metadata',
+    ]
     with csv_path.open('w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=csv_fields)
         writer.writeheader()
         for u in users:
-            writer.writerow({
-                'id': u['id'],
-                'email': u['email'],
-                'encrypted_password': u['encrypted_password'],
-                'email_confirmed_at': u['email_confirmed_at'] or '',
-                'created_at': u['created_at'] or '',
-                'updated_at': u['updated_at'] or '',
-                'user_metadata': json.dumps(u['user_metadata'], ensure_ascii=False),
-                'app_metadata': json.dumps(u['app_metadata'], ensure_ascii=False),
-            })
+            writer.writerow(
+                {
+                    'id': u['id'],
+                    'email': u['email'],
+                    'encrypted_password': u['encrypted_password'],
+                    'email_confirmed_at': u['email_confirmed_at'] or '',
+                    'created_at': u['created_at'] or '',
+                    'updated_at': u['updated_at'] or '',
+                    'user_metadata': json.dumps(u['user_metadata'], ensure_ascii=False),
+                    'app_metadata': json.dumps(u['app_metadata'], ensure_ascii=False),
+                }
+            )
 
     print(f"✅ Exported {len(users)} users")
     print(f" - JSON: {json_path}")
@@ -136,4 +143,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

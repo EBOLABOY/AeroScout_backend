@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 订阅与配额服务（基于 Supabase）
 
@@ -8,14 +7,15 @@
 - 根据套餐配额执行用量检查与计数
 - 简单的管理员分配/变更用户套餐（不依赖第三方支付）
 """
+
 from __future__ import annotations
 
-from datetime import datetime, date, timezone, timedelta
-from typing import Optional, Dict, Any, List, Tuple
+from datetime import UTC, date, datetime, timedelta
+from typing import Any
+
 from loguru import logger
 
 from fastapi_app.config.supabase_config import get_supabase_client
-
 
 ACTIVE_STATUSES = {"trialing", "active", "past_due", "paused"}
 
@@ -29,7 +29,7 @@ class SubscriptionService:
             logger.error("SubscriptionService 初始化失败：无法创建 Supabase 客户端")
 
     # -------- Plans --------
-    async def list_plans(self, only_active: bool = True) -> List[Dict[str, Any]]:
+    async def list_plans(self, only_active: bool = True) -> list[dict[str, Any]]:
         try:
             query = self.client.table("plans").select("*")
             if only_active:
@@ -40,7 +40,7 @@ class SubscriptionService:
             logger.error(f"获取套餐失败: {e}")
             return []
 
-    async def get_plan_by_slug(self, slug: str) -> Optional[Dict[str, Any]]:
+    async def get_plan_by_slug(self, slug: str) -> dict[str, Any] | None:
         try:
             result = self.client.table("plans").select("*").eq("slug", slug).limit(1).execute()
             return result.data[0] if result.data else None
@@ -48,7 +48,7 @@ class SubscriptionService:
             logger.error(f"根据 slug 获取套餐失败: {e}")
             return None
 
-    async def get_plan_by_id(self, plan_id: str) -> Optional[Dict[str, Any]]:
+    async def get_plan_by_id(self, plan_id: str) -> dict[str, Any] | None:
         try:
             result = self.client.table("plans").select("*").eq("id", plan_id).limit(1).execute()
             return result.data[0] if result.data else None
@@ -57,11 +57,10 @@ class SubscriptionService:
             return None
 
     # -------- Subscriptions --------
-    async def get_active_subscription(self, user_id: str) -> Optional[Dict[str, Any]]:
+    async def get_active_subscription(self, user_id: str) -> dict[str, Any] | None:
         try:
             result = (
-                self.client
-                .table("subscriptions")
+                self.client.table("subscriptions")
                 .select("*")
                 .eq("user_id", user_id)
                 .in_("status", list(ACTIVE_STATUSES))
@@ -78,7 +77,14 @@ class SubscriptionService:
             logger.error(f"获取用户订阅失败: {e}")
             return None
 
-    async def assign_subscription(self, user_id: str, plan_slug: str, trial_days: int = 0, period_days: int = 31, cancel_at_period_end: bool = False) -> Optional[Dict[str, Any]]:
+    async def assign_subscription(
+        self,
+        user_id: str,
+        plan_slug: str,
+        trial_days: int = 0,
+        period_days: int = 31,
+        cancel_at_period_end: bool = False,
+    ) -> dict[str, Any] | None:
         """
         直接为用户分配订阅（管理员/系统使用）。
         默认创建当期周期为 ~1 月。
@@ -91,12 +97,14 @@ class SubscriptionService:
 
             # 结束其它活跃订阅
             try:
-                self.client.table("subscriptions").update({"status": "canceled", "canceled_at": datetime.now(timezone.utc).isoformat()}).eq("user_id", user_id).in_("status", list(ACTIVE_STATUSES)).execute()
+                self.client.table("subscriptions").update(
+                    {"status": "canceled", "canceled_at": datetime.now(UTC).isoformat()}
+                ).eq("user_id", user_id).in_("status", list(ACTIVE_STATUSES)).execute()
             except Exception:
                 pass
 
-            now = datetime.now(timezone.utc)
-            trial_end = (now.replace(tzinfo=timezone.utc) if trial_days <= 0 else now + timedelta(days=trial_days))
+            now = datetime.now(UTC)
+            trial_end = now.replace(tzinfo=UTC) if trial_days <= 0 else now + timedelta(days=trial_days)
             period_end = now + timedelta(days=max(1, period_days))
 
             data = {
@@ -121,24 +129,24 @@ class SubscriptionService:
     async def cancel_subscription(self, user_id: str, immediate: bool = False) -> bool:
         """取消用户订阅。immediate=True 立即取消，否则仅标记到期取消。"""
         try:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             if immediate:
-                self.client.table("subscriptions").update({
-                    "status": "canceled",
-                    "canceled_at": now,
-                    "cancel_at_period_end": True
-                }).eq("user_id", user_id).in_("status", list(ACTIVE_STATUSES)).execute()
+                self.client.table("subscriptions").update(
+                    {"status": "canceled", "canceled_at": now, "cancel_at_period_end": True}
+                ).eq("user_id", user_id).in_("status", list(ACTIVE_STATUSES)).execute()
             else:
-                self.client.table("subscriptions").update({
-                    "cancel_at_period_end": True
-                }).eq("user_id", user_id).in_("status", list(ACTIVE_STATUSES)).execute()
+                self.client.table("subscriptions").update({"cancel_at_period_end": True}).eq("user_id", user_id).in_(
+                    "status", list(ACTIVE_STATUSES)
+                ).execute()
             return True
         except Exception as e:
             logger.error(f"取消订阅失败: {e}")
             return False
 
     # -------- Expiration cycle (auto-downgrade) --------
-    async def check_and_expire_subscriptions(self, remind_days: int = 3, send_reminders: bool = False) -> Dict[str, int]:
+    async def check_and_expire_subscriptions(
+        self, remind_days: int = 3, send_reminders: bool = False
+    ) -> dict[str, int]:
         """
         扫描订阅并执行自动降级/取消，以及（可选）到期提醒。
 
@@ -147,17 +155,14 @@ class SubscriptionService:
         - 可选：对未来 remind_days 内到期的活跃订阅发送提醒
         """
         stats = {"canceled": 0, "expired": 0, "reminded": 0}
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         try:
             # 1) 到期且标记期末取消 => 取消
             try:
                 res_cancel = (
-                    self.client.table("subscriptions").update({
-                        "status": "canceled",
-                        "canceled_at": now.isoformat(),
-                        "updated_at": now.isoformat()
-                    })
+                    self.client.table("subscriptions")
+                    .update({"status": "canceled", "canceled_at": now.isoformat(), "updated_at": now.isoformat()})
                     .lte("current_period_end", now.isoformat())
                     .eq("cancel_at_period_end", True)
                     .in_("status", ["trialing", "active", "past_due"])  # paused 保留
@@ -170,10 +175,8 @@ class SubscriptionService:
             # 2) 其他到期 => 过期
             try:
                 res_expire = (
-                    self.client.table("subscriptions").update({
-                        "status": "expired",
-                        "updated_at": now.isoformat()
-                    })
+                    self.client.table("subscriptions")
+                    .update({"status": "expired", "updated_at": now.isoformat()})
                     .lte("current_period_end", now.isoformat())
                     .eq("cancel_at_period_end", False)
                     .in_("status", ["trialing", "active", "past_due"])  # paused 保留
@@ -188,7 +191,8 @@ class SubscriptionService:
                 try:
                     upcoming = now + timedelta(days=remind_days)
                     res_due = (
-                        self.client.table("subscriptions").select("*")
+                        self.client.table("subscriptions")
+                        .select("*")
                         .gt("current_period_end", now.isoformat())
                         .lte("current_period_end", upcoming.isoformat())
                         .in_("status", ["trialing", "active", "past_due"])  # 即将到期
@@ -206,7 +210,13 @@ class SubscriptionService:
                             # 查用户邮箱
                             email = None
                             try:
-                                ures = self.client.table("users").select("email,username").eq("id", user_id).limit(1).execute()
+                                ures = (
+                                    self.client.table("users")
+                                    .select("email,username")
+                                    .eq("id", user_id)
+                                    .limit(1)
+                                    .execute()
+                                )
                                 if ures.data:
                                     email = (ures.data[0] or {}).get("email")
                                     username = (ures.data[0] or {}).get("username") or "用户"
@@ -236,11 +246,13 @@ class SubscriptionService:
         except Exception as e:
             logger.error(f"订阅到期检测失败: {e}")
 
-        logger.info(f"订阅到期处理: canceled={stats['canceled']}, expired={stats['expired']}, reminded={stats['reminded']}")
+        logger.info(
+            f"订阅到期处理: canceled={stats['canceled']}, expired={stats['expired']}, reminded={stats['reminded']}"
+        )
         return stats
 
     # -------- Quotas & Usage --------
-    async def get_user_quotas(self, user_id: str) -> Dict[str, Any]:
+    async def get_user_quotas(self, user_id: str) -> dict[str, Any]:
         sub = await self.get_active_subscription(user_id)
         if sub and sub.get("plan"):
             return sub["plan"].get("quotas", {}) or {}
@@ -248,16 +260,20 @@ class SubscriptionService:
         return {"daily_flight_searches": 20, "max_active_monitor_tasks": 1}
 
     def _today(self) -> date:
-        return datetime.now(timezone.utc).date()
+        return datetime.now(UTC).date()
 
     async def get_usage(self, user_id: str, metric: str, window: str = "daily") -> int:
         try:
             today = self._today()
             result = (
-                self.client.table("usage_counters").select("*")
-                .eq("user_id", user_id).eq("metric", metric).eq("time_window", window)
+                self.client.table("usage_counters")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("metric", metric)
+                .eq("time_window", window)
                 .eq("period_start", today.isoformat())
-                .limit(1).execute()
+                .limit(1)
+                .execute()
             )
             row = result.data[0] if result.data else None
             return int(row["count"]) if row else 0
@@ -269,9 +285,13 @@ class SubscriptionService:
         today = self._today()
         try:
             # upsert-like: try update, if 0 then insert
-            upd = self.client.table("usage_counters").update({
-                "count": self.client.rpc("sql", {"q": "count + 1"}) if False else None  # placeholder, will do read-modify-write below
-            })
+            self.client.table("usage_counters").update(
+                {
+                    "count": self.client.rpc("sql", {"q": "count + 1"})
+                    if False
+                    else None  # placeholder, will do read-modify-write below
+                }
+            )
         except Exception:
             pass
         # simple read-modify-write
@@ -280,28 +300,33 @@ class SubscriptionService:
         try:
             # try update
             result = (
-                self.client.table("usage_counters").update({
-                    "count": new_count,
-                    "updated_at": datetime.now(timezone.utc).isoformat()
-                })
-                .eq("user_id", user_id).eq("metric", metric).eq("time_window", window)
-                .eq("period_start", today.isoformat()).execute()
+                self.client.table("usage_counters")
+                .update({"count": new_count, "updated_at": datetime.now(UTC).isoformat()})
+                .eq("user_id", user_id)
+                .eq("metric", metric)
+                .eq("time_window", window)
+                .eq("period_start", today.isoformat())
+                .execute()
             )
             if not result.data:
                 # insert
-                self.client.table("usage_counters").insert({
-                    "user_id": user_id,
-                    "metric": metric,
-                    "time_window": window,
-                    "period_start": today.isoformat(),
-                    "count": new_count
-                }).execute()
+                self.client.table("usage_counters").insert(
+                    {
+                        "user_id": user_id,
+                        "metric": metric,
+                        "time_window": window,
+                        "period_start": today.isoformat(),
+                        "count": new_count,
+                    }
+                ).execute()
             return new_count
         except Exception as e:
             logger.error(f"递增用量失败: {e}")
             return current
 
-    async def enforce_quota(self, user_id: str, metric: str, window: str = "daily", increment: int = 1) -> Tuple[bool, Dict[str, Any]]:
+    async def enforce_quota(
+        self, user_id: str, metric: str, window: str = "daily", increment: int = 1
+    ) -> tuple[bool, dict[str, Any]]:
         quotas = await self.get_user_quotas(user_id)
         limit_key = None
         if metric == "flight_searches":
@@ -323,14 +348,20 @@ class SubscriptionService:
 
     async def get_active_monitor_tasks(self, user_id: str) -> int:
         try:
-            result = self.client.table("monitor_tasks").select("id", count="exact").eq("user_id", user_id).eq("is_active", True).execute()
+            result = (
+                self.client.table("monitor_tasks")
+                .select("id", count="exact")
+                .eq("user_id", user_id)
+                .eq("is_active", True)
+                .execute()
+            )
             return int(result.count or 0)
         except Exception as e:
             logger.error(f"统计活跃监控任务失败: {e}")
             return 0
 
 
-_subscription_service: Optional[SubscriptionService] = None
+_subscription_service: SubscriptionService | None = None
 
 
 async def get_subscription_service() -> SubscriptionService:

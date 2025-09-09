@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Import users into Supabase Auth via Admin API using Service Role Key.
 
@@ -14,12 +13,14 @@ Usage examples:
 Env vars required:
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 """
-import os
-import json
+
 import argparse
-from pathlib import Path
-import time
+import json
+import os
 import sys
+import time
+from pathlib import Path
+
 import requests
 
 
@@ -31,11 +32,7 @@ def load_users(json_path: Path):
 
 
 def admin_headers(srk: str):
-    return {
-        'Authorization': f'Bearer {srk}',
-        'apikey': srk,
-        'Content-Type': 'application/json'
-    }
+    return {'Authorization': f'Bearer {srk}', 'apikey': srk, 'Content-Type': 'application/json'}
 
 
 def create_user(base_url: str, srk: str, user: dict) -> tuple[int, str]:
@@ -65,10 +62,14 @@ def get_user(base_url: str, srk: str, user_id: str) -> int:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--json', default=str(Path('scripts') / 'output' / 'auth_import.json'), help='Path to auth_import.json')
+    parser.add_argument(
+        '--json', default=str(Path('scripts') / 'output' / 'auth_import.json'), help='Path to auth_import.json'
+    )
     parser.add_argument('--limit', type=int, default=0, help='Limit number of users to import (0=all)')
     parser.add_argument('--skip', type=int, default=0, help='Skip N users before importing')
-    parser.add_argument('--verify-only', action='store_true', help='Only verify presence via Admin API without creating')
+    parser.add_argument(
+        '--verify-only', action='store_true', help='Only verify presence via Admin API without creating'
+    )
     args = parser.parse_args()
 
     base_url = os.getenv('SUPABASE_URL')
@@ -124,4 +125,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

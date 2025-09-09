@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Backfill a missing auth.users + public.profiles for a given user_id using Service Role Key.
 
 Usage:
   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... python scripts/backfill_orphan_user.py 7ecbc245-7eb8-47b1-9a1b-2492df95202b
 """
+
 import os
 import sys
-import json
-from datetime import datetime, timezone
-from typing import Optional
-import requests
+from datetime import UTC, datetime
+
 import bcrypt
+import requests
 
 
-def iso(dt: Optional[datetime] = None):
-    dt = dt or datetime.now(timezone.utc)
-    return dt.astimezone(timezone.utc).isoformat()
+def iso(dt: datetime | None = None):
+    dt = dt or datetime.now(UTC)
+    return dt.astimezone(UTC).isoformat()
 
 
 def headers_json(srk: str):
@@ -26,7 +25,9 @@ def headers_json(srk: str):
 
 def get_app_user(base: str, srk: str, user_id: str):
     try:
-        url = base.rstrip('/') + f"/rest/v1/users?id=eq.{user_id}&select=id,username,email,created_at,updated_at&limit=1"
+        url = (
+            base.rstrip('/') + f"/rest/v1/users?id=eq.{user_id}&select=id,username,email,created_at,updated_at&limit=1"
+        )
         r = requests.get(url, headers=headers_json(srk), timeout=20)
         if r.status_code != 200:
             return None
@@ -46,7 +47,7 @@ def create_auth_user(base: str, srk: str, user_id: str, email: str, username: st
         "encrypted_password": rand_pw,
         "email_confirmed_at": iso(),
         "app_metadata": {"provider": "email", "providers": ["email"]},
-        "user_metadata": {"username": username, "is_admin": False}
+        "user_metadata": {"username": username, "is_admin": False},
     }
     r = requests.post(url, headers=headers_json(srk), json=payload, timeout=20)
     if r.status_code not in (200, 201):
@@ -61,14 +62,16 @@ def get_auth_user(base: str, srk: str, user_id: str) -> bool:
 
 def upsert_profile(base: str, srk: str, user_id: str, email: str, username: str):
     url = base.rstrip('/') + "/rest/v1/profiles"
-    payload = [{
-        "id": user_id,
-        "email": email,
-        "username": username,
-        "is_admin": False,
-        "created_at": iso(),
-        "updated_at": iso()
-    }]
+    payload = [
+        {
+            "id": user_id,
+            "email": email,
+            "username": username,
+            "is_admin": False,
+            "created_at": iso(),
+            "updated_at": iso(),
+        }
+    ]
     # Prefer upsert: need to set Prefer header
     h = headers_json(srk).copy()
     h["Prefer"] = "resolution=merge-duplicates"

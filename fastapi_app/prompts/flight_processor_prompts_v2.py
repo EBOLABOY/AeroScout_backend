@@ -4,6 +4,7 @@
 通过分离静态指令和动态数据，减少冗余，提高可维护性
 """
 
+
 def get_consolidated_instructions_prompt(language: str = "zh") -> str:
     """
     生成统一的、无冗余的静态指令。
@@ -243,6 +244,7 @@ def get_consolidated_instructions_prompt(language: str = "zh") -> str:
   4. **Important Reminders**: Include risks of hidden city fares and general travel tips (visas, airport arrival time).
 """
 
+
 def create_final_analysis_prompt(
     google_flights_data: list,
     kiwi_data: list,
@@ -250,7 +252,7 @@ def create_final_analysis_prompt(
     language: str,
     departure_code: str,
     destination_code: str,
-    user_preferences: str = ""
+    user_preferences: str = "",
 ) -> str:
     """
     组装最终的、完整的提示词。
@@ -284,7 +286,9 @@ def create_final_analysis_prompt(
     # 添加常规航班数据（现在source字段为flight_engine_a）
     if google_flights_data:
         for flight in google_flights_data:
-            flight_data = flight if isinstance(flight, dict) else flight.__dict__ if hasattr(flight, '__dict__') else str(flight)
+            flight_data = (
+                flight if isinstance(flight, dict) else flight.__dict__ if hasattr(flight, '__dict__') else str(flight)
+            )
             if isinstance(flight_data, dict):
                 # 自动检测混淆后的source字段
                 source = flight_data.get('source', '')
@@ -301,7 +305,9 @@ def create_final_analysis_prompt(
     # 添加隐藏城市航班数据（现在source字段为flight_engine_b）
     if kiwi_data:
         for flight in kiwi_data:
-            flight_data = flight if isinstance(flight, dict) else flight.__dict__ if hasattr(flight, '__dict__') else str(flight)
+            flight_data = (
+                flight if isinstance(flight, dict) else flight.__dict__ if hasattr(flight, '__dict__') else str(flight)
+            )
             if isinstance(flight_data, dict):
                 # 保留原有分类，同时检查新的source字段
                 source = flight_data.get('source', '')
@@ -316,7 +322,9 @@ def create_final_analysis_prompt(
     # 添加AI推荐航班数据（现在source字段为ai_optimized）
     if ai_data:
         for flight in ai_data:
-            flight_data = flight if isinstance(flight, dict) else flight.__dict__ if hasattr(flight, '__dict__') else str(flight)
+            flight_data = (
+                flight if isinstance(flight, dict) else flight.__dict__ if hasattr(flight, '__dict__') else str(flight)
+            )
             if isinstance(flight_data, dict):
                 # AI推荐数据特殊处理
                 source = flight_data.get('source', '')
@@ -345,12 +353,15 @@ def create_final_analysis_prompt(
 """
 
     # 【增强日志】记录发送给AI的数据概览（适应混淆后的数据源）
-    import logging
     import json
+    import logging
+
     logger = logging.getLogger(__name__)
-    logger.info(f"🔍 [提示词构建] 数据统计: 搜索引擎A({len(google_flights_data)}), 搜索引擎B({len(kiwi_data)}), AI优化推荐({len(ai_data)})")
+    logger.info(
+        f"🔍 [提示词构建] 数据统计: 搜索引擎A({len(google_flights_data)}), 搜索引擎B({len(kiwi_data)}), AI优化推荐({len(ai_data)})"
+    )
     logger.info(f"📊 [提示词构建] 合并后总计: {total_flights} 个航班")
-    
+
     # 统计混淆后的数据源分布
     source_stats = {}
     for flight in all_flights:
@@ -363,12 +374,12 @@ def create_final_analysis_prompt(
     if all_flights:
         logger.info(f"📊 [提示词构建] 合并数据样本: {str(all_flights[0])[:200]}...")
         try:
-            merged_json_test = json.dumps(all_flights[0], default=str, ensure_ascii=False)
-            logger.info(f"✅ [提示词构建] 合并数据JSON序列化成功")
+            json.dumps(all_flights[0], default=str, ensure_ascii=False)
+            logger.info("✅ [提示词构建] 合并数据JSON序列化成功")
         except Exception as e:
             logger.error(f"❌ [提示词构建] 合并数据JSON序列化失败: {e}")
     else:
-        logger.warning(f"⚠️ [提示词构建] 没有可用的航班数据")
+        logger.warning("⚠️ [提示词构建] 没有可用的航班数据")
 
     # 4. 组合所有部分，并给出最终执行指令
     final_prompt = f"""{base_instructions}
@@ -381,11 +392,13 @@ def create_final_analysis_prompt(
 
     return final_prompt
 
+
 # 保留旧函数以兼容现有代码，但标记为已弃用
 def get_flight_processor_system_prompt(language: str = "zh") -> str:
     """获取航班数据处理的系统提示词 (已弃用，请使用 get_consolidated_instructions_prompt)"""
     # 直接调用新的优化函数
     return get_consolidated_instructions_prompt(language)
+
 
 # 保留旧函数以兼容现有代码，但标记为已弃用
 def get_flight_processing_prompt(*args, **kwargs) -> str:
@@ -399,6 +412,6 @@ def get_flight_processing_prompt(*args, **kwargs) -> str:
             language=args[3],
             departure_code=args[4],
             destination_code=args[5],
-            user_preferences=args[6] if len(args) > 6 else ""
+            user_preferences=args[6] if len(args) > 6 else "",
         )
     return create_final_analysis_prompt(**kwargs)

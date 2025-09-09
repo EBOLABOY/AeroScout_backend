@@ -1,9 +1,12 @@
 """
 订阅与配额的 Pydantic 模型
 """
+
 from __future__ import annotations
-from typing import Optional, Dict, Any
+
 from enum import Enum
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -23,8 +26,8 @@ class Plan(BaseModel):
     price_cents: int
     currency: str
     billing_interval: str
-    features: Dict[str, Any] = Field(default_factory=dict)
-    quotas: Dict[str, Any] = Field(default_factory=dict)
+    features: dict[str, Any] = Field(default_factory=dict)
+    quotas: dict[str, Any] = Field(default_factory=dict)
     is_active: bool
 
 
@@ -33,10 +36,10 @@ class UserSubscription(BaseModel):
     user_id: str
     plan_id: str
     status: SubscriptionStatus
-    current_period_end: Optional[str] = None
+    current_period_end: str | None = None
     cancel_at_period_end: bool = False
-    trial_end: Optional[str] = None
-    plan: Optional[Plan] = None
+    trial_end: str | None = None
+    plan: Plan | None = None
 
 
 class UsageCounter(BaseModel):
@@ -47,8 +50,7 @@ class UsageCounter(BaseModel):
 
 
 class SubscriptionOverview(BaseModel):
-    plan: Optional[Plan]
-    subscription: Optional[UserSubscription]
-    quotas: Dict[str, Any] = Field(default_factory=dict)
-    usage: Dict[str, UsageCounter] = Field(default_factory=dict)
-
+    plan: Plan | None
+    subscription: UserSubscription | None
+    quotas: dict[str, Any] = Field(default_factory=dict)
+    usage: dict[str, UsageCounter] = Field(default_factory=dict)

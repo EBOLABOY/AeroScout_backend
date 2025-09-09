@@ -2,19 +2,18 @@
 Supabase 配置和连接管理
 统一使用 settings.py 中的配置，避免重复
 """
-from typing import Optional
-from supabase import create_client, Client
+
 from loguru import logger
 
+from supabase import Client, create_client
+
 # 导入统一配置
-from .settings import (
-    SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
-)
+from .settings import SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL
 
 
 class SupabaseConfig:
     """Supabase 配置类"""
-    
+
     def __init__(self):
         # 使用统一配置
         self.supabase_url = SUPABASE_URL
@@ -23,7 +22,7 @@ class SupabaseConfig:
 
         # 验证配置
         self._validate_config()
-    
+
     def _validate_config(self):
         """验证 Supabase 配置"""
         if not self.is_configured:
@@ -33,13 +32,13 @@ class SupabaseConfig:
     def is_configured(self) -> bool:
         """检查 Supabase 是否已正确配置"""
         return bool(self.supabase_url and self.supabase_key)
-    
-    def get_client(self, use_service_key: bool = False) -> Optional[Client]:
+
+    def get_client(self, use_service_key: bool = False) -> Client | None:
         """获取 Supabase 客户端"""
         if not self.is_configured:
             logger.error("Supabase 配置不完整")
             return None
-        
+
         try:
             key = self.supabase_service_key if use_service_key and self.supabase_service_key else self.supabase_key
             client = create_client(self.supabase_url, key)
@@ -54,7 +53,7 @@ class SupabaseConfig:
 supabase_config = SupabaseConfig()
 
 
-def get_supabase_client(use_service_key: bool = False) -> Optional[Client]:
+def get_supabase_client(use_service_key: bool = False) -> Client | None:
     """获取 Supabase 客户端实例"""
     return supabase_config.get_client(use_service_key)
 

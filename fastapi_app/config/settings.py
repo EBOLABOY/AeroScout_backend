@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 FastAPI 应用配置设置 - 纯Supabase方案
 """
 
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # 加载环境变量文件
@@ -53,10 +53,6 @@ SUBSCRIPTION_CHECK_INTERVAL_HOURS = int(os.getenv("SUBSCRIPTION_CHECK_INTERVAL_H
 SUBSCRIPTION_REMIND_DAYS = int(os.getenv("SUBSCRIPTION_REMIND_DAYS", "3"))
 
 
-
-
-
-
 # CORS 配置
 CORS_ORIGINS = [
     "http://localhost:30000",
@@ -64,7 +60,7 @@ CORS_ORIGINS = [
     "http://localhost:38181",
     "http://127.0.0.1:38181",
     "https://ticketradar.izlx.de",
-    "http://ticketradar.izlx.de"
+    "http://ticketradar.izlx.de",
 ]
 
 # 受信任主机
@@ -80,28 +76,31 @@ APP_NAME = "Ticketradar API"
 APP_VERSION = "2.0.0"
 APP_DESCRIPTION = "机票监控和AI旅行规划系统"
 
+
 # 配置验证
 def validate_config():
     """验证配置"""
     errors = []
-    
+
     # Supabase 配置验证（必需）
     if not SUPABASE_URL:
         errors.append("SUPABASE_URL is required")
     if not SUPABASE_ANON_KEY:
         errors.append("SUPABASE_ANON_KEY is required")
-    
+
     if not AI_API_KEY:
         errors.append("AI_API_KEY is required for AI services")
-    
+
     if errors:
         raise ValueError(f"Configuration errors: {', '.join(errors)}")
+
 
 # 在导入时验证配置
 try:
     validate_config()
 except ValueError as e:
     print(f"⚠️  Configuration warning: {e}")
+
 
 # 配置摘要
 def get_config_summary():
@@ -114,20 +113,19 @@ def get_config_summary():
         "database": "Supabase",
         "ai_service": "Gemini (OpenAI API)" if AI_API_KEY else "None",
         "cache": "Redis" if REDIS_URL else "Memory",
-
     }
+
 
 # 创建settings对象以便导入
 class Settings:
     """配置设置类"""
+
     def __init__(self):
         # 基本配置
         self.DEBUG = DEBUG
         self.SECRET_KEY = SECRET_KEY
         self.APP_NAME = APP_NAME
         self.APP_VERSION = APP_VERSION
-
-
 
         # 数据库配置（Supabase）
         self.SUPABASE_URL = SUPABASE_URL
@@ -158,10 +156,11 @@ class Settings:
 
         # 信任的主机列表
         self.TRUSTED_HOSTS = TRUSTED_HOSTS  # 使用配置文件中的设置，而非硬编码
-    
+
     def get_config_summary(self):
         """获取配置摘要"""
         return get_config_summary()
+
 
 # 创建全局settings实例
 settings = Settings()

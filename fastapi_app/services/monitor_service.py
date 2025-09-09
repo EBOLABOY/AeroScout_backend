@@ -2,15 +2,16 @@
 FastAPI版本的监控任务服务
 基于原有MonitorTaskManager，优化为纯异步实现
 """
+
 import asyncio
 import os
-from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Optional, Any
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
 from loguru import logger
 
 from fastapi_app.models.monitor import (
-    MonitorTaskCreate, MonitorTaskUpdate, MonitorTaskResponse,
-    MonitorTaskExecutionResult, MonitorSystemStatus
+    MonitorSystemStatus,
 )
 from fastapi_app.services.flight_service import get_flight_service
 from fastapi_app.services.notification_service import get_notification_service
@@ -19,7 +20,7 @@ from fastapi_app.services.supabase_service import get_supabase_service
 
 class FastAPIMonitorService:
     """FastAPI版本的监控任务服务"""
-    
+
     def __init__(self):
         """初始化监控服务"""
         self.flight_service = get_flight_service()
@@ -34,7 +35,7 @@ class FastAPIMonitorService:
             'successful_executions': 0,
             'failed_executions': 0,
             'start_time': None,
-            'last_execution': None
+            'last_execution': None,
         }
         # 固定爬取的城市列表
         self.fixed_cities = ['HKG', 'SZX', 'CAN', 'MFM']
@@ -66,7 +67,7 @@ class FastAPIMonitorService:
             return False
 
         self.running = True
-        self.stats['start_time'] = datetime.now(timezone.utc)
+        self.stats['start_time'] = datetime.now(UTC)
 
         # 启动异步监控任务
         self.monitor_task = asyncio.create_task(self._monitoring_loop())
@@ -77,7 +78,7 @@ class FastAPIMonitorService:
 
         logger.info("异步监控系统和固定城市爬取已启动")
         return True
-    
+
     async def stop_monitoring(self) -> bool:
         """停止监控系统"""
         if not self.running:
@@ -103,7 +104,7 @@ class FastAPIMonitorService:
 
         logger.info("异步监控系统和固定城市爬取已停止")
         return True
-    
+
     async def _monitoring_loop(self):
         """异步监控循环"""
         while self.running:
@@ -117,42 +118,42 @@ class FastAPIMonitorService:
             except Exception as e:
                 logger.error(f"监控循环出错: {e}")
                 await asyncio.sleep(60)  # 出错后等待1分钟再重试
-    
+
     async def _run_monitoring_cycle(self):
         """运行一个监控周期"""
         try:
             logger.info("开始监控周期...")
             self.stats['total_executions'] += 1
-            self.stats['last_execution'] = datetime.now(timezone.utc)
-            
+            self.stats['last_execution'] = datetime.now(UTC)
+
             # 获取所有活跃的监控任务
             active_tasks = await self._get_active_monitor_tasks()
             logger.info(f"找到 {len(active_tasks)} 个活跃监控任务")
-            
+
             # 并发执行监控任务
             tasks = []
             for task in active_tasks:
                 tasks.append(self._execute_monitor_task(task))
-            
+
             if tasks:
                 results = await asyncio.gather(*tasks, return_exceptions=True)
-                
+
                 # 统计执行结果
                 successful = sum(1 for r in results if isinstance(r, dict) and r.get('success', False))
                 failed = len(results) - successful
-                
+
                 self.stats['successful_executions'] += successful
                 self.stats['failed_executions'] += failed
-                
+
                 logger.info(f"监控周期完成: 成功={successful}, 失败={failed}")
             else:
                 logger.info("没有活跃的监控任务")
-                
+
         except Exception as e:
             logger.error(f"监控周期执行失败: {e}")
             self.stats['failed_executions'] += 1
-    
-    async def _get_active_monitor_tasks(self) -> List[Dict[str, Any]]:
+
+    async def _get_active_monitor_tasks(self) -> list[dict[str, Any]]:
         """获取所有活跃的监控任务"""
         try:
             # 使用异步数据库服务获取活跃的监控任务
@@ -164,15 +165,15 @@ class FastAPIMonitorService:
         except Exception as e:
             logger.error(f"获取活跃监控任务失败: {e}")
             return []
-    
-    async def _execute_monitor_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+
+    async def _execute_monitor_task(self, task: dict[str, Any]) -> dict[str, Any]:
         """执行单个监控任务"""
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
         task_id = task.get('id', 0)
-        
+
         try:
             logger.info(f"执行监控任务 {task_id}: {task.get('name', 'Unknown')}")
-            
+
             # 检查是否需要发送通知（避免重复通知）
             if task.get('last_notification'):
                 last_notification = datetime.fromisoformat(task['last_notification'])
@@ -180,7 +181,7 @@ class FastAPIMonitorService:
                 if (start_time - last_notification) < cooldown:
                     logger.info(f"任务 {task_id} 在冷却期内，跳过通知")
                     return {'success': True, 'skipped': True, 'reason': 'cooldown'}
-            
+
             # 执行航班搜索
             # 如果没有指定目的地，搜索热门目的地
             destination_code = task.get('destination_code')
@@ -194,62 +195,49 @@ class FastAPIMonitorService:
             if not destination_code or destination_code in ['', 'null', 'NULL', 'ANY']:
                 logger.info(f"任务 {task_id} 没有指定目的地，使用监控数据API获取所有航班")
                 # 无指定目的地，使用监控数据API获取所有可用航班
-                monitor_result = await self.flight_service.get_monitor_data_async(
-                    city_code=task['departure_code']
-                )
+                monitor_result = await self.flight_service.get_monitor_data_async(city_code=task['departure_code'])
 
                 if monitor_result['success']:
                     # 修复数据格式问题：直接使用 flights 键
                     all_flights = monitor_result.get('flights', [])
                     logger.info(f"任务 {task_id} 从监控数据获取到 {len(all_flights)} 个航班")
-                    search_result = {
-                        'success': True,
-                        'flights': all_flights
-                    }
+                    search_result = {'success': True, 'flights': all_flights}
                 else:
                     logger.warning(f"获取监控数据失败: {monitor_result.get('error', 'Unknown error')}")
-                    search_result = {
-                        'success': False,
-                        'flights': []
-                    }
+                    search_result = {'success': False, 'flights': []}
             else:
                 logger.info(f"任务 {task_id} 有指定目的地 {destination_code}，使用监控数据API搜索")
                 # 有指定目的地，使用监控数据API（类似仪表板）
-                monitor_result = await self.flight_service.get_monitor_data_async(
-                    city_code=task['departure_code']
-                )
+                monitor_result = await self.flight_service.get_monitor_data_async(city_code=task['departure_code'])
 
                 if monitor_result['success']:
                     # 修复数据格式问题：直接使用 flights 键
                     all_flights = monitor_result.get('flights', [])
                     filtered_flights = [
-                        flight for flight in all_flights
-                        if (flight.get('代码') == destination_code or
-                            flight.get('destination_code') == destination_code or
-                            flight.get('code') == destination_code)
+                        flight
+                        for flight in all_flights
+                        if (
+                            flight.get('代码') == destination_code
+                            or flight.get('destination_code') == destination_code
+                            or flight.get('code') == destination_code
+                        )
                     ]
 
                     logger.info(f"从 {len(all_flights)} 个航班中过滤出 {len(filtered_flights)} 个目标航班")
-                    search_result = {
-                        'success': True,
-                        'flights': filtered_flights
-                    }
+                    search_result = {'success': True, 'flights': filtered_flights}
                 else:
                     logger.warning(f"获取监控数据失败: {monitor_result.get('error', 'Unknown error')}")
-                    search_result = {
-                        'success': False,
-                        'flights': []
-                    }
-            
+                    search_result = {'success': False, 'flights': []}
+
             if not search_result['success']:
                 logger.warning(f"任务 {task_id} 航班搜索失败: {search_result.get('error', 'Unknown error')}")
                 return {
                     'success': False,
                     'task_id': task_id,
                     'error': search_result.get('error', 'Flight search failed'),
-                    'execution_duration': (datetime.now(timezone.utc) - start_time).total_seconds()
+                    'execution_duration': (datetime.now(UTC) - start_time).total_seconds(),
                 }
-            
+
             # 过滤低于阈值的机票
             flights = search_result.get('flights', [])
             price_threshold = task.get('price_threshold', 1000.0)
@@ -260,43 +248,38 @@ class FastAPIMonitorService:
                 price = self._extract_flight_price(flight)
                 if price <= price_threshold:
                     low_price_flights.append(flight)
-            
+
             logger.info(f"任务 {task_id} 找到 {len(flights)} 个航班，其中 {len(low_price_flights)} 个低价航班")
-            
+
             # 如果有低价航班且启用通知，发送通知
             notification_sent = False
             if low_price_flights and task.get('notification_enabled', True):
                 notification_sent = await self._send_notification(task, low_price_flights)
-            
+
             # 更新任务统计信息
             await self._update_task_stats(task_id, True, len(flights), len(low_price_flights), notification_sent)
-            
-            execution_duration = (datetime.now(timezone.utc) - start_time).total_seconds()
-            
+
+            execution_duration = (datetime.now(UTC) - start_time).total_seconds()
+
             return {
                 'success': True,
                 'task_id': task_id,
                 'flights_found': len(flights),
                 'low_price_flights': len(low_price_flights),
                 'notification_sent': notification_sent,
-                'execution_duration': execution_duration
+                'execution_duration': execution_duration,
             }
-            
+
         except Exception as e:
             logger.error(f"执行监控任务 {task_id} 失败: {e}")
-            execution_duration = (datetime.now(timezone.utc) - start_time).total_seconds()
-            
+            execution_duration = (datetime.now(UTC) - start_time).total_seconds()
+
             # 更新任务统计信息
             await self._update_task_stats(task_id, False, 0, 0, False)
-            
-            return {
-                'success': False,
-                'task_id': task_id,
-                'error': str(e),
-                'execution_duration': execution_duration
-            }
-    
-    async def _send_notification(self, task: Dict[str, Any], low_price_flights: List[Dict[str, Any]]) -> bool:
+
+            return {'success': False, 'task_id': task_id, 'error': str(e), 'execution_duration': execution_duration}
+
+    async def _send_notification(self, task: dict[str, Any], low_price_flights: list[dict[str, Any]]) -> bool:
         """发送通知"""
         try:
             logger.info(f"发送通知给任务 {task.get('id', 0)}: {len(low_price_flights)} 个低价航班")
@@ -307,18 +290,18 @@ class FastAPIMonitorService:
             if not user_id:
                 logger.warning(f"任务 {task.get('id', 0)} 缺少用户ID，无法发送通知")
                 return False
-            
+
             # 从数据库获取用户的通知设置
             try:
                 user_info = await db_service.get_user_by_id(user_id)
                 if not user_info:
                     logger.warning(f"找不到用户 {user_id}，无法发送通知")
                     return False
-                
+
                 # 从用户元数据中获取通知设置
                 user_metadata = user_info.get('user_metadata', {})
                 notification_settings = user_metadata.get('notification_settings', {})
-                
+
             except Exception as e:
                 logger.error(f"获取用户 {user_id} 信息失败: {e}")
                 return False
@@ -330,7 +313,7 @@ class FastAPIMonitorService:
                 'email_notifications_enabled': notification_settings.get('email_notifications', False),
                 'email_verified': user_info.get('email_verified', False),
                 'pushplus_token': notification_settings.get('pushplus_token'),  # 用户自己设置的token
-                'notification_enabled': notification_settings.get('price_alerts', True)  # 价格提醒开关
+                'notification_enabled': notification_settings.get('price_alerts', True),  # 价格提醒开关
             }
 
             # 构建航班数据
@@ -340,16 +323,16 @@ class FastAPIMonitorService:
                 'trip_type': '往返' if task.get('return_date') else '单程',
                 'depart_date': task.get('depart_date', ''),
                 'return_date': task.get('return_date', ''),
-                'flights': low_price_flights
+                'flights': low_price_flights,
             }
 
             # 检查用户是否配置了通知方式
             has_pushplus = bool(user_data.get('pushplus_token'))
             notifications_enabled = user_data.get('notification_enabled', True)
-            
+
             if not has_pushplus:
                 logger.info(f"用户 {user_data.get('username')} 未配置PushPlus token，建议在个人设置中配置")
-            
+
             if not notifications_enabled:
                 logger.info(f"用户 {user_data.get('username')} 已禁用价格提醒通知")
                 return False
@@ -372,7 +355,7 @@ class FastAPIMonitorService:
             logger.error(f"发送通知失败: {e}")
             return False
 
-    def _extract_flight_price(self, flight: Dict[str, Any]) -> float:
+    def _extract_flight_price(self, flight: dict[str, Any]) -> float:
         """从航班数据中提取价格
         TODO: 抽取到统一的工具函数（例如 utils/price.py），与 AI 服务中的价格过滤逻辑共用，减少重复。
         """
@@ -398,10 +381,11 @@ class FastAPIMonitorService:
                         if isinstance(price_value, str):
                             # 提取数字部分
                             import re
+
                             numbers = re.findall(r'\d+\.?\d*', price_value)
                             if numbers:
                                 return float(numbers[0])
-                        elif isinstance(price_value, (int, float)):
+                        elif isinstance(price_value, int | float):
                             return float(price_value)
                     except (ValueError, TypeError):
                         continue
@@ -412,19 +396,14 @@ class FastAPIMonitorService:
         except Exception as e:
             logger.error(f"提取航班价格失败: {e}")
             return float('inf')
-    
+
     async def _update_task_stats(
-        self,
-        task_id: int,
-        success: bool,
-        flights_found: int,
-        low_price_flights: int,
-        notification_sent: bool
+        self, task_id: int, success: bool, flights_found: int, low_price_flights: int, notification_sent: bool
     ):
         """更新任务统计信息"""
         try:
             # 更新数据库中的任务统计信息
-            current_time = datetime.now(timezone.utc)
+            current_time = datetime.now(UTC)
 
             # 获取当前任务信息以更新计数器
             task = await self.db_service.get_monitor_task_by_id(task_id)
@@ -441,14 +420,16 @@ class FastAPIMonitorService:
                     last_check=current_time,
                     total_checks=new_total_checks,
                     last_notification=current_time if notification_sent else None,
-                    total_notifications=new_total_notifications
+                    total_notifications=new_total_notifications,
                 )
 
-                logger.debug(f"更新任务 {task_id} 统计信息: 成功={success}, 航班={flights_found}, 低价={low_price_flights}, 通知={notification_sent}")
+                logger.debug(
+                    f"更新任务 {task_id} 统计信息: 成功={success}, 航班={flights_found}, 低价={low_price_flights}, 通知={notification_sent}"
+                )
 
         except Exception as e:
             logger.error(f"更新任务统计信息失败: {e}")
-    
+
     async def get_system_status(self) -> MonitorSystemStatus:
         """获取监控系统状态"""
         try:
@@ -471,13 +452,13 @@ class FastAPIMonitorService:
                 execution_interval=self.monitor_interval_minutes,
                 total_executions=self.stats['total_executions'],
                 successful_executions=self.stats['successful_executions'],
-                failed_executions=self.stats['failed_executions']
+                failed_executions=self.stats['failed_executions'],
             )
         except Exception as e:
             logger.error(f"获取系统状态失败: {e}")
             raise
 
-    async def list_tasks(self, user_id: str, page: int, page_size: int, is_active: Optional[bool]) -> Dict[str, Any]:
+    async def list_tasks(self, user_id: str, page: int, page_size: int, is_active: bool | None) -> dict[str, Any]:
         """获取用户的监控任务列表"""
         db_service = await self.get_db_service()
 
@@ -492,15 +473,9 @@ class FastAPIMonitorService:
 
         total_pages = (total + page_size - 1) // page_size
 
-        return {
-            'tasks': tasks,
-            'total': total,
-            'page': page,
-            'page_size': page_size,
-            'total_pages': total_pages
-        }
+        return {'tasks': tasks, 'total': total, 'page': page, 'page_size': page_size, 'total_pages': total_pages}
 
-    async def get_task(self, task_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    async def get_task(self, task_id: str, user_id: str) -> dict[str, Any] | None:
         """获取单个监控任务"""
         db_service = await self.get_db_service()
         task = await db_service.get_monitor_task_by_id(task_id)
@@ -543,9 +518,7 @@ class FastAPIMonitorService:
                     logger.info(f"正在爬取城市 {city_code} ({i+1}/{len(self.fixed_cities)})")
 
                     # 调用航班服务获取监控数据
-                    result = await self.flight_service.get_monitor_data_async(
-                        city_code=city_code
-                    )
+                    result = await self.flight_service.get_monitor_data_async(city_code=city_code)
 
                     if result.get('success'):
                         flights_count = len(result.get('flights', []))
@@ -568,7 +541,7 @@ class FastAPIMonitorService:
 
 
 # 全局服务实例
-_monitor_service: Optional[FastAPIMonitorService] = None
+_monitor_service: FastAPIMonitorService | None = None
 
 
 def get_monitor_service() -> FastAPIMonitorService:
