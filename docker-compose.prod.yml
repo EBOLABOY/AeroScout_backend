@@ -1,0 +1,6 @@
+services:
+  app:
+    # Override build with a pre-built image from registry
+    image: ${APP_IMAGE}
+    build: null
+

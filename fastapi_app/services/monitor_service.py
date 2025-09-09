@@ -38,6 +38,19 @@ class FastAPIMonitorService:
         }
         # 固定爬取的城市列表
         self.fixed_cities = ['HKG', 'SZX', 'CAN', 'MFM']
+        # 可配置的运行周期与间隔
+        try:
+            self.monitor_interval_minutes = int(os.environ.get('MONITOR_INTERVAL_MINUTES', '30'))
+        except ValueError:
+            self.monitor_interval_minutes = 30
+        try:
+            self.fixed_crawl_interval_minutes = int(os.environ.get('FIXED_CRAWL_INTERVAL_MINUTES', '30'))
+        except ValueError:
+            self.fixed_crawl_interval_minutes = 30
+        try:
+            self.fixed_crawl_city_delay_seconds = int(os.environ.get('FIXED_CRAWL_CITY_DELAY_SECONDS', '5'))
+        except ValueError:
+            self.fixed_crawl_city_delay_seconds = 5
         logger.info("FastAPIMonitorService初始化成功")
 
     async def get_db_service(self):
@@ -97,7 +110,7 @@ class FastAPIMonitorService:
             try:
                 await self._run_monitoring_cycle()
                 # 等待下一个监控周期（默认30分钟）
-                await asyncio.sleep(30 * 60)
+                await asyncio.sleep(self.monitor_interval_minutes * 60)
             except asyncio.CancelledError:
                 logger.info("监控循环被取消")
                 break
@@ -446,7 +459,7 @@ class FastAPIMonitorService:
 
             next_execution = None
             if self.running and self.stats['last_execution']:
-                next_execution = self.stats['last_execution'] + timedelta(minutes=30)
+                next_execution = self.stats['last_execution'] + timedelta(minutes=self.monitor_interval_minutes)
 
             return MonitorSystemStatus(
                 is_running=self.running,
@@ -455,7 +468,7 @@ class FastAPIMonitorService:
                 active_tasks=active_tasks,
                 last_execution=self.stats['last_execution'],
                 next_execution=next_execution,
-                execution_interval=30,
+                execution_interval=self.monitor_interval_minutes,
                 total_executions=self.stats['total_executions'],
                 successful_executions=self.stats['successful_executions'],
                 failed_executions=self.stats['failed_executions']
@@ -511,7 +524,7 @@ class FastAPIMonitorService:
             try:
                 await self._run_fixed_crawl_cycle()
                 # 等待下一个爬取周期（默认30分钟）
-                await asyncio.sleep(30 * 60)
+                await asyncio.sleep(self.fixed_crawl_interval_minutes * 60)
             except asyncio.CancelledError:
                 logger.info("固定城市爬取循环被取消")
                 break
@@ -542,7 +555,7 @@ class FastAPIMonitorService:
 
                     # 城市间间隔5秒，避免请求过于频繁
                     if i < len(self.fixed_cities) - 1:
-                        await asyncio.sleep(5)
+                        await asyncio.sleep(self.fixed_crawl_city_delay_seconds)
 
                 except Exception as e:
                     logger.error(f"爬取城市 {city_code} 时出错: {e}")

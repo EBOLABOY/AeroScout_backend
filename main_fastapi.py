@@ -73,6 +73,30 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"⚠️ 监控系统启动失败: {e}")
 
+        # 启动订阅到期检查后台任务（按配置周期执行）
+        try:
+            from fastapi_app.services.subscription_service import get_subscription_service
+            interval_hours = getattr(settings, 'SUBSCRIPTION_CHECK_INTERVAL_HOURS', 24) or 24
+            remind_days = getattr(settings, 'SUBSCRIPTION_REMIND_DAYS', 3) or 3
+
+            async def subscription_expiration_worker():
+                try:
+                    svc = await get_subscription_service()
+                    # 启动时先跑一轮
+                    await svc.check_and_expire_subscriptions(remind_days=remind_days, send_reminders=False)
+                    while True:
+                        await asyncio.sleep(int(interval_hours) * 3600)
+                        await svc.check_and_expire_subscriptions(remind_days=remind_days, send_reminders=False)
+                except asyncio.CancelledError:
+                    logger.info("订阅到期检查任务已取消")
+                except Exception as e:
+                    logger.error(f"订阅到期检查任务异常: {e}")
+
+            asyncio.create_task(subscription_expiration_worker())
+            logger.info(f"⏰ 订阅到期检查任务已启动，每 {interval_hours} 小时运行一次")
+        except Exception as e:
+            logger.warning(f"⚠️ 启动订阅到期任务失败: {e}")
+
         logger.info("✅ FastAPI应用启动完成")
     except Exception as e:
         logger.error(f"❌ 应用启动初始化失败: {e}")
@@ -144,9 +168,11 @@ def create_fastapi_app() -> FastAPI:
     app = setup_performance_middleware(app)
     
     # 注册路由
-    from fastapi_app.routers import auth, flights, monitor, admin
+    from fastapi_app.routers import flights, monitor, admin, subscription
+    from fastapi_app.routers import auth_supabase as auth
 
-    app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
+    app.include_router(auth.router, prefix="/auth", tags=["认证"])
+    app.include_router(subscription.router, prefix="/api/subscription", tags=["订阅"])
     app.include_router(monitor.router, prefix="/api/monitor", tags=["监控"])
     app.include_router(flights.router, prefix="/api/flights", tags=["航班"])
     app.include_router(admin.router, prefix="/api/admin", tags=["管理员"])

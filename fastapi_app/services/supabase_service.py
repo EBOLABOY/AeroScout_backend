@@ -192,6 +192,25 @@ class SupabaseService:
             # 返回现有用户数据（如果存在）
             return await self.get_user_by_id(supabase_user.id) if hasattr(supabase_user, 'id') else None
 
+    # 兼容新增：profiles 支持（向后兼容旧 users 表）
+    async def get_profile_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            prof = self.client.table("profiles").select("*").eq("id", user_id).limit(1).execute()
+            if prof.data:
+                return prof.data[0]
+        except Exception as e:
+            logger.warning(f"查询profiles失败，回退users: {e}")
+        return await self.get_user_by_id(user_id)
+
+    async def get_profile_by_username(self, username: str) -> Optional[Dict[str, Any]]:
+        try:
+            prof = self.client.table("profiles").select("*").eq("username", username).limit(1).execute()
+            if prof.data:
+                return prof.data[0]
+        except Exception as e:
+            logger.warning(f"查询profiles失败，回退users: {e}")
+        return await self.get_user_by_username(username)
+
     # ==================== 密码重置Token管理 ====================
 
     async def create_password_reset_token(self, token_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:

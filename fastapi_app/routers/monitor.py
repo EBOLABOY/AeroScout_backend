@@ -16,6 +16,7 @@ from fastapi_app.dependencies.auth import get_current_active_user, optional_auth
 from fastapi_app.services.monitor_service import get_monitor_service, FastAPIMonitorService
 from fastapi_app.services.supabase_service import get_supabase_service
 from fastapi_app.services.flight_service import get_flight_service
+from fastapi_app.services.subscription_service import get_subscription_service
 
 # 创建路由器
 router = APIRouter()
@@ -188,6 +189,7 @@ async def create_monitor_task(
 
         db_task_data = {
             "user_id": current_user.id,
+            "name": task_data.name,
             "task_name": task_data.name,
             "departure_code": task_data.departure_code,
             "destination_code": destination_code,
@@ -206,6 +208,18 @@ async def create_monitor_task(
             "blacklist_cities": getattr(task_data, 'blacklist_cities', None),
             "blacklist_countries": getattr(task_data, 'blacklist_countries', None)
         }
+
+        # 订阅与配额：限制活跃任务数量
+        sub_service = await get_subscription_service()
+        quotas = await sub_service.get_user_quotas(current_user.id)
+        max_active = int(quotas.get("max_active_monitor_tasks") or 0)
+        if max_active > 0:
+            active_count = await sub_service.get_active_monitor_tasks(current_user.id)
+            if active_count >= max_active:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"已达到套餐限制的活跃监控任务数量（{max_active} 个）。请停用部分任务或升级套餐。"
+                )
 
         # 保存到数据库
         db_service = await get_supabase_service()
@@ -228,6 +242,9 @@ async def create_monitor_task(
                 detail="数据库保存失败"
             )
 
+    except HTTPException:
+        # 直接抛出以保留具体的状态码（例如配额超限403）
+        raise
     except Exception as e:
         logger.error(f"创建监控任务失败: {e}")
         raise HTTPException(

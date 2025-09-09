@@ -20,6 +20,7 @@ from ..dependencies.auth import get_current_active_user
 from ..services.supabase_auth_service import SupabaseAuthService, get_supabase_auth_service
 from ..services.supabase_service import get_supabase_service
 from ..services.supabase_service import SupabaseService
+from ..services.subscription_service import get_subscription_service
 
 router = APIRouter()
 
@@ -30,6 +31,11 @@ async def check_admin_permission(current_user: UserInfo) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="缺少系统管理权限"
         )
+
+# 统一的管理员依赖：获取当前用户并校验管理员权限
+async def require_admin(current_user: UserInfo = Depends(get_current_active_user)) -> UserInfo:
+    await check_admin_permission(current_user)
+    return current_user
 
 # 系统启动时间
 START_TIME = time.time()
@@ -132,6 +138,61 @@ async def get_system_stats(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="获取系统统计失败"
         )
+
+
+@router.post("/users/{user_id}/subscription", response_model=APIResponse)
+async def assign_user_subscription(
+    user_id: str,
+    body: dict,
+    current_user: UserInfo = Depends(require_admin)
+):
+    """
+    为指定用户分配/切换套餐（管理员）。
+    body: {"plan_slug": "pro", "trial_days": 0, "period_days": 31, "cancel_at_period_end": false}
+    """
+    try:
+        plan_slug = body.get("plan_slug")
+        if not plan_slug:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少 plan_slug")
+
+        trial_days = int(body.get("trial_days") or 0)
+        period_days = int(body.get("period_days") or 31)
+        cancel_at_period_end = bool(body.get("cancel_at_period_end") or False)
+
+        sub_service = await get_subscription_service()
+        sub = await sub_service.assign_subscription(user_id, plan_slug, trial_days=trial_days, period_days=period_days, cancel_at_period_end=cancel_at_period_end)
+        if not sub:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="分配订阅失败或套餐不存在")
+
+        return APIResponse(success=True, message="分配订阅成功", data={"subscription": sub})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"分配订阅失败: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="分配订阅失败")
+
+
+@router.post("/users/{user_id}/subscription/cancel", response_model=APIResponse)
+async def cancel_user_subscription(
+    user_id: str,
+    body: dict = None,
+    current_user: UserInfo = Depends(require_admin)
+):
+    """
+    取消用户订阅（管理员）。body: {"immediate": false}
+    """
+    try:
+        immediate = bool((body or {}).get("immediate") or False)
+        sub_service = await get_subscription_service()
+        ok = await sub_service.cancel_subscription(user_id, immediate=immediate)
+        if not ok:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="取消订阅失败")
+        return APIResponse(success=True, message="操作成功", data={"immediate": immediate})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"取消订阅失败: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="取消订阅失败")
 
 
 

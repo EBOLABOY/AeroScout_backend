@@ -25,6 +25,7 @@ from fastapi_app.services.ai_flight_service import AIFlightService
 from fastapi_app.services.flight_service import get_flight_service
 from fastapi_app.services.async_task_service import async_task_service, TaskStatus, ProcessingStage, StageInfo
 from fastapi_app.services.search_log_service import get_search_log_service
+from fastapi_app.services.subscription_service import get_subscription_service
 
 # 创建路由器
 router = APIRouter()
@@ -319,6 +320,17 @@ async def search_flights(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail='出发地和目的地不能相同'
+            )
+
+        # 订阅与配额：限制每日搜索次数
+        sub_service = await get_subscription_service()
+        allowed, info = await sub_service.enforce_quota(current_user.id, metric="flight_searches", window="daily", increment=1)
+        if not allowed:
+            limit = info.get('limit')
+            used = info.get('used')
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"今日航班搜索次数已达上限（{used}/{limit}）。请明日再试或升级套餐。"
             )
 
         # 获取航班搜索服务

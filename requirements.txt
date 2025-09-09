@@ -12,7 +12,10 @@ email_validator==2.3.0
 supabase==2.18.1
 
 # Caching
-redis==6.4.0
+# The Python Redis client uses the package name `redis`.
+# Version 6.x refers to the Redis server, not the Python client.
+# Use a compatible 5.x series which supports redis.asyncio
+redis>=5.0.0,<6.0.0
 
 # Authentication & Security
 PyJWT==2.10.1

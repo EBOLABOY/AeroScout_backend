@@ -21,6 +21,8 @@ SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+SUPABASE_DATABASE_URL = os.getenv("SUPABASE_DATABASE_URL")
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
 
 # Redis 缓存配置
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -45,6 +47,10 @@ SITE_URL = os.getenv("SITE_URL", "http://localhost:3000")
 # 测试数据保存配置
 ENABLE_TEST_DATA_SAVE = os.getenv("ENABLE_TEST_DATA_SAVE", "False").lower() == "true"
 TEST_DATA_DIR = os.getenv("TEST_DATA_DIR", "./test_data")
+
+# 订阅任务配置
+SUBSCRIPTION_CHECK_INTERVAL_HOURS = int(os.getenv("SUBSCRIPTION_CHECK_INTERVAL_HOURS", "24"))
+SUBSCRIPTION_REMIND_DAYS = int(os.getenv("SUBSCRIPTION_REMIND_DAYS", "3"))
 
 
 
@@ -127,6 +133,8 @@ class Settings:
         self.SUPABASE_URL = SUPABASE_URL
         self.SUPABASE_ANON_KEY = SUPABASE_ANON_KEY
         self.SUPABASE_SERVICE_ROLE_KEY = SUPABASE_SERVICE_ROLE_KEY
+        self.SUPABASE_DATABASE_URL = SUPABASE_DATABASE_URL
+        self.SUPABASE_JWT_SECRET = SUPABASE_JWT_SECRET
 
         # AI配置
         self.AI_API_KEY = AI_API_KEY
@@ -143,6 +151,10 @@ class Settings:
 
         # 其他配置
         self.REDIS_URL = REDIS_URL
+
+        # 订阅后台任务
+        self.SUBSCRIPTION_CHECK_INTERVAL_HOURS = SUBSCRIPTION_CHECK_INTERVAL_HOURS
+        self.SUBSCRIPTION_REMIND_DAYS = SUBSCRIPTION_REMIND_DAYS
 
         # 信任的主机列表
         self.TRUSTED_HOSTS = TRUSTED_HOSTS  # 使用配置文件中的设置，而非硬编码

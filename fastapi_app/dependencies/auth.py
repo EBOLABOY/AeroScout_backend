@@ -1,128 +1,104 @@
 """
-Supabase认证依赖 - 纯Supabase认证方案
-遵循KISS原则，移除传统JWT认证
+认证依赖：切换为被动验证 Supabase JWT
 """
+
 from typing import Optional
+from datetime import datetime
+
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from loguru import logger
 
+from fastapi_app.config import settings
 from fastapi_app.models.auth import UserInfo
 from fastapi_app.services.supabase_service import get_supabase_service
-from fastapi_app.services.supabase_auth_service import get_supabase_auth_service
 
-# Supabase安全方案
-security = HTTPBearer(auto_error=False)
+
+security = HTTPBearer()
 optional_security = HTTPBearer(auto_error=False)
 
 
-async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> UserInfo:
-    """获取当前用户（纯Supabase认证）"""
-    if credentials is None:
-        logger.error("认证失败: 没有提供认证凭据")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="需要认证",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> UserInfo:
     token = credentials.credentials
-    logger.info(f"收到认证请求，Token长度: {len(token) if token else 0}")
-    
-    try:
-        # 使用Supabase Auth服务验证token
-        auth_service = get_supabase_auth_service()
-        result = await auth_service.get_user_by_access_token(token)
-        
-        if not result["success"]:
-            logger.error(f"Token验证失败: {result.get('error', 'Unknown error')}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="无效的认证令牌",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        supabase_user = result["user"]
-        logger.info(f"用户认证成功: {supabase_user.email}")
-        
-        # 同步用户数据到业务表
-        db_service = await get_supabase_service()
-        synced_user = await db_service.sync_user_from_supabase_auth(supabase_user)
-        
-        if not synced_user:
-            logger.warning(f"用户数据同步失败: {supabase_user.id}")
-            # 即使同步失败，也允许使用基本用户信息
-        
-        # 从Supabase用户数据构建UserInfo
-        user_info = UserInfo(
-            id=supabase_user.id,
-            username=supabase_user.user_metadata.get("username") or supabase_user.email.split("@")[0],
-            email=supabase_user.email,
-            is_admin=supabase_user.app_metadata.get("is_admin", False),
-            user_level_id=supabase_user.user_metadata.get("user_level_id"),
-            user_level_name=supabase_user.user_metadata.get("user_level_name", "user"),
-            created_at=supabase_user.created_at
-        )
-        
-        logger.debug(f"用户认证成功: {user_info.username}")
-        return user_info
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"认证验证异常: {e}")
+    supabase_jwt_secret = settings.SUPABASE_JWT_SECRET
+    if not supabase_jwt_secret:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="认证处理失败",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="服务器未配置JWT验证密钥",
         )
+
+    user_id = None
+    email = None
+    # 优先用 Supabase JWT 解码
+    try:
+        payload = jwt.decode(token, supabase_jwt_secret, algorithms=["HS256"])
+        user_id = payload.get("sub")
+        email = payload.get("email")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token已过期")
+    except jwt.InvalidTokenError:
+        # 向后兼容：尝试旧JWT
+        try:
+            legacy = jwt.decode(
+                token,
+                getattr(settings, "JWT_SECRET_KEY", None),
+                algorithms=[getattr(settings, "JWT_ALGORITHM", "HS256")],
+            )
+            user_id = legacy.get("user_id")
+        except Exception as e:
+            logger.warning(f"JWT解码失败: {e}")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的认证令牌")
+
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="令牌缺少用户标识")
+
+    db = await get_supabase_service()
+    # 从 profiles 表获取应用附属信息
+    profile = await db.get_profile_by_id(user_id)
+    if not profile:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户档案不存在")
+
+    user_info = UserInfo(
+        id=profile["id"],
+        username=profile.get("username", ""),
+        email=email or profile.get("email", ""),
+        is_admin=profile.get("is_admin", False),
+        created_at=str(profile.get("created_at", datetime.utcnow().isoformat())),
+    )
+    return user_info
 
 
 async def get_current_active_user(current_user: UserInfo = Depends(get_current_user)) -> UserInfo:
-    """获取当前活跃用户"""
     return current_user
 
 
-async def optional_auth(credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security)) -> Optional[UserInfo]:
+async def optional_auth(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security),
+) -> Optional[UserInfo]:
     """可选认证 - 允许匿名访问"""
     if credentials is None:
         return None
-
     try:
-        return await get_current_user(credentials)
+        return await get_current_user(credentials)  # type: ignore[arg-type]
     except HTTPException:
         return None
 
 
-# 为了保持一致性，创建一个别名
 get_current_user_optional = optional_auth
 
 
-# 安全配置类 - 保留用于密码验证
 class SecurityConfig:
-    """安全配置"""
-    # 密码策略（用于Supabase注册验证）
     MIN_PASSWORD_LENGTH = 6
     MAX_PASSWORD_LENGTH = 128
-
-    # 用户名策略
     MIN_USERNAME_LENGTH = 3
     MAX_USERNAME_LENGTH = 50
 
     @classmethod
     def validate_password(cls, password: str) -> bool:
-        """验证密码强度"""
-        if len(password) < cls.MIN_PASSWORD_LENGTH:
-            return False
-        if len(password) > cls.MAX_PASSWORD_LENGTH:
-            return False
-        return True
+        return cls.MIN_PASSWORD_LENGTH <= len(password) <= cls.MAX_PASSWORD_LENGTH
 
     @classmethod
     def validate_username(cls, username: str) -> bool:
-        """验证用户名格式"""
-        if len(username) < cls.MIN_USERNAME_LENGTH:
-            return False
-        if len(username) > cls.MAX_USERNAME_LENGTH:
-            return False
-        return True
+        return cls.MIN_USERNAME_LENGTH <= len(username) <= cls.MAX_USERNAME_LENGTH
+
