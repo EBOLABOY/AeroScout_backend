@@ -57,6 +57,14 @@ async def lifespan(app: FastAPI):
 
             cache_service = await get_cache_service()
             if cache_service:
+                app.state.cache_service = cache_service
+                from fastapi_app.services.async_task_service import AsyncTaskService, set_async_task_service
+
+                async_task_service_instance = AsyncTaskService(cache_service)
+                await async_task_service_instance.initialize()
+                set_async_task_service(async_task_service_instance)
+                app.state.async_task_service = async_task_service_instance
+
                 await cache_service.warm_up_cache()
                 logger.info("✅ Redis缓存服务初始化完成")
             else:
@@ -176,7 +184,7 @@ def create_fastapi_app() -> FastAPI:
     from fastapi_app.routers import admin, flights, monitor, subscription
     from fastapi_app.routers import auth_supabase as auth
 
-    app.include_router(auth.router, prefix="/auth", tags=["认证"])
+    app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
     app.include_router(subscription.router, prefix="/api/subscription", tags=["订阅"])
     app.include_router(monitor.router, prefix="/api/monitor", tags=["监控"])
     app.include_router(flights.router, prefix="/api/flights", tags=["航班"])

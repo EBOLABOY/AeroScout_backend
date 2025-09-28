@@ -8,6 +8,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
+from fastapi import Request
 from loguru import logger
 
 from fastapi_app.services.cache_service import CacheService
@@ -90,14 +91,20 @@ class StageInfo:
 class AsyncTaskService:
     """异步任务管理服务"""
 
-    def __init__(self):
-        self.cache_service = CacheService()
+    def __init__(self, cache_service: CacheService | None = None):
+        self.cache_service = cache_service or CacheService()
         self.task_prefix = "async_task"
         self.default_ttl = 3600  # 1小时过期
 
     async def initialize(self):
         """初始化服务"""
-        await self.cache_service.connect()
+        if not self.cache_service.is_connected():
+            await self.cache_service.connect()
+
+        if not self.cache_service.is_connected():
+            logger.error("Redis连接不可用，异步任务服务无法启动")
+            raise RuntimeError("AsyncTaskService initialization failed: Redis unavailable")
+
         logger.info("AsyncTaskService初始化完成")
 
     def generate_task_id(self) -> str:
@@ -122,6 +129,10 @@ class AsyncTaskService:
         Returns:
             task_id: 任务ID
         """
+        if not self.cache_service.is_connected():
+            logger.error("Redis连接不可用，无法创建异步任务")
+            raise RuntimeError("Async task cache unavailable")
+
         task_id = self.generate_task_id()
 
         # 任务基本信息
@@ -140,17 +151,43 @@ class AsyncTaskService:
             "stage_info": StageInfo.get_stage_info(ProcessingStage.INITIALIZATION),
         }
 
-        # 存储任务信息
-        await self.cache_service.set(self._get_task_key(task_id, "info"), task_info, expire=self.default_ttl)
+        cache_backend = "redis"
+        info_key = self._get_task_key(task_id, "info")
+        status_key = self._get_task_key(task_id, "status")
 
-        # 存储任务状态
-        await self.cache_service.set(
-            self._get_task_key(task_id, "status"),
+        logger.debug(
+            f"准备向{cache_backend}写入异步任务信息: task_id={task_id}, key={info_key}, type={task_type}"
+        )
+        logger.debug(f"任务元数据: {task_info}")
+
+        info_saved = await self.cache_service.set(
+            info_key, task_info, expire=self.default_ttl, require_redis=True
+        )
+        if not info_saved:
+            logger.error(f"任务信息 {task_id} 写入缓存失败 (key={info_key})")
+            raise RuntimeError("Failed to persist async task metadata")
+
+        retrieved_info = await self.cache_service.get(info_key, dict, require_redis=True)
+        if not retrieved_info:
+            logger.error(f"严重错误: 刚写入的任务 {task_id} 无法从缓存读取 (key={info_key})")
+            await self.cache_service.delete(info_key, require_redis=True)
+            raise RuntimeError("Async task metadata verification failed")
+
+        logger.debug(f"已确认任务信息写入成功: {task_id}")
+
+        status_saved = await self.cache_service.set(
+            status_key,
             TaskStatus.PENDING.value,  # 确保保存为字符串
             expire=self.default_ttl,
+            require_redis=True,
         )
+        if not status_saved:
+            logger.error(f"任务状态 {task_id} 写入缓存失败 (key={status_key})")
+            await self.cache_service.delete(info_key, require_redis=True)
+            await self.cache_service.delete(status_key, require_redis=True)
+            raise RuntimeError("Failed to persist async task status")
 
-        logger.info(f"创建异步任务: {task_id}, 类型: {task_type}")
+        logger.info(f"创建异步任务: {task_id}, 类型: {task_type}, 缓存后端: {cache_backend}")
         return task_id
 
     async def update_task_status(
@@ -175,7 +212,11 @@ class AsyncTaskService:
         """
         try:
             # 获取当前任务信息
-            task_info = await self.cache_service.get(self._get_task_key(task_id, "info"), dict)
+            task_info = await self.cache_service.get(
+                self._get_task_key(task_id, "info"),
+                dict,
+                require_redis=True,
+            )
 
             if not task_info:
                 logger.error(f"任务不存在: {task_id}")
@@ -202,15 +243,23 @@ class AsyncTaskService:
                 task_info["stage"] = stage.value
                 task_info["stage_info"] = StageInfo.get_stage_info(stage)
 
-            # 保存更新后的信息
-            await self.cache_service.set(self._get_task_key(task_id, "info"), task_info, expire=self.default_ttl)
+            info_updated = await self.cache_service.set(
+                self._get_task_key(task_id, "info"),
+                task_info,
+                expire=self.default_ttl,
+                require_redis=True,
+            )
 
-            # 更新状态
-            await self.cache_service.set(
+            status_updated = await self.cache_service.set(
                 self._get_task_key(task_id, "status"),
                 status.value,  # 确保保存为字符串
                 expire=self.default_ttl,
+                require_redis=True,
             )
+
+            if not info_updated or not status_updated:
+                logger.error(f"任务状态 {task_id} 写入缓存失败")
+                return False
 
             logger.info(
                 f"任务状态更新: {task_id} -> {status} (进度: {progress}%, 阶段: {stage.value if stage else 'auto'})"
@@ -221,10 +270,11 @@ class AsyncTaskService:
             logger.error(f"更新任务状态失败 {task_id}: {e}")
             return False
 
+
     async def get_task_info(self, task_id: str) -> dict[str, Any] | None:
         """获取任务信息"""
         try:
-            task_info = await self.cache_service.get(self._get_task_key(task_id, "info"), dict)
+            task_info = await self.cache_service.get(self._get_task_key(task_id, "info"), dict, require_redis=True)
             return task_info
         except Exception as e:
             logger.error(f"获取任务信息失败 {task_id}: {e}")
@@ -233,7 +283,7 @@ class AsyncTaskService:
     async def get_task_status(self, task_id: str) -> TaskStatus | None:
         """获取任务状态"""
         try:
-            status = await self.cache_service.get(self._get_task_key(task_id, "status"), str)
+            status = await self.cache_service.get(self._get_task_key(task_id, "status"), str, require_redis=True)
             return TaskStatus(status) if status else None
         except Exception as e:
             logger.error(f"获取任务状态失败 {task_id}: {e}")
@@ -242,7 +292,16 @@ class AsyncTaskService:
     async def save_task_result(self, task_id: str, result: dict[str, Any]) -> bool:
         """保存任务结果"""
         try:
-            await self.cache_service.set(self._get_task_key(task_id, "result"), result, expire=self.default_ttl)
+            saved = await self.cache_service.set(
+                self._get_task_key(task_id, "result"),
+                result,
+                expire=self.default_ttl,
+                require_redis=True,
+            )
+
+            if not saved:
+                logger.error(f"任务结果 {task_id} 写入缓存失败")
+                return False
 
             logger.info(f"任务结果已保存: {task_id}")
             return True
@@ -251,10 +310,11 @@ class AsyncTaskService:
             logger.error(f"保存任务结果失败 {task_id}: {e}")
             return False
 
+
     async def get_task_result(self, task_id: str) -> dict[str, Any] | None:
         """获取任务结果"""
         try:
-            result = await self.cache_service.get(self._get_task_key(task_id, "result"), dict)
+            result = await self.cache_service.get(self._get_task_key(task_id, "result"), dict, require_redis=True)
             return result
         except Exception as e:
             logger.error(f"获取任务结果失败 {task_id}: {e}")
@@ -269,8 +329,14 @@ class AsyncTaskService:
                 self._get_task_key(task_id, "result"),
             ]
 
+            failures: list[str] = []
             for key in keys_to_delete:
-                await self.cache_service.delete(key)
+                if not await self.cache_service.delete(key, require_redis=True):
+                    failures.append(key)
+
+            if failures:
+                logger.error(f"任务删除失败: {task_id}, 未能删除的键: {failures}")
+                return False
 
             logger.info(f"任务已删除: {task_id}")
             return True
@@ -278,6 +344,7 @@ class AsyncTaskService:
         except Exception as e:
             logger.error(f"删除任务失败 {task_id}: {e}")
             return False
+
 
     async def cleanup_expired_tasks(self) -> int:
         """清理过期任务"""
@@ -287,5 +354,19 @@ class AsyncTaskService:
         return 0
 
 
-# 全局实例
+# 全局实例（用于脚本或缺少应用上下文时的后备）
 async_task_service = AsyncTaskService()
+
+
+def set_async_task_service(service: AsyncTaskService) -> None:
+    """注册应用范围内的异步任务服务实例"""
+    global async_task_service
+    async_task_service = service
+
+
+async def get_async_task_service(request: Request) -> AsyncTaskService:
+    """FastAPI依赖：优先返回应用状态中的任务服务"""
+    service = getattr(request.app.state, "async_task_service", None)
+    if service is not None:
+        return service
+    return async_task_service

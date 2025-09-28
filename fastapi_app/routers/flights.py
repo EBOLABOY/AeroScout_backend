@@ -27,7 +27,13 @@ from fastapi_app.models.flights import (
     SortBy,
 )
 from fastapi_app.services.ai_flight_service import AIFlightService
-from fastapi_app.services.async_task_service import ProcessingStage, StageInfo, TaskStatus, async_task_service
+from fastapi_app.services.async_task_service import (
+    AsyncTaskService,
+    ProcessingStage,
+    StageInfo,
+    TaskStatus,
+    get_async_task_service,
+)
 from fastapi_app.services.flight_service import get_flight_service
 from fastapi_app.services.quota_service import QuotaType
 from fastapi_app.services.search_log_service import get_search_log_service
@@ -735,187 +741,7 @@ async def start_ai_enhanced_search_async(
     currency: str = Query("CNY", description="货币设置 (CNY/USD)"),
     user_preferences: str = Query("", description="用户偏好和要求"),
     current_user: UserInfo | None = Depends(get_current_user_optional),
-):
-    """
-    异步AI增强航班搜索 - 根据用户等级提供不同服务级别
-
-    等级权益：
-    - guest: 不允许使用异步搜索
-    - user: 基础异步搜索
-    - plus/pro: 增强搜索 + 优先处理
-    - max/vip: 完整搜索 + 最高优先级
-    """
-    try:
-        # 检查用户等级权限
-        from fastapi_app.dependencies.permissions import Permission, PermissionChecker, Role
-
-        user_role = PermissionChecker.get_user_role(current_user)
-
-        # 游客不允许使用异步搜索
-        if user_role == Role.GUEST:
-            raise UserLevelError.insufficient_level(
-                current_level='guest', required_level='user', feature_name='异步AI搜索功能'
-            )
-
-        # 检查权限
-        has_enhanced_search = PermissionChecker.has_permission(current_user, Permission.FLIGHT_SEARCH_ENHANCED)
-        has_unlimited_ai = PermissionChecker.has_permission(current_user, Permission.FLIGHT_AI_UNLIMITED)
-
-        # 根据等级设置任务优先级和配置
-        task_priority = "low"
-        max_concurrent_tasks = 1
-
-        if user_role in [Role.PLUS, Role.PRO]:
-            task_priority = "normal"
-            max_concurrent_tasks = 2
-        elif user_role in [Role.MAX, Role.VIP]:
-            task_priority = "high"
-            max_concurrent_tasks = 5
-
-        logger.info(
-            f"用户 {current_user.username} (等级: {user_role.value}) 创建异步AI搜索任务，优先级: {task_priority}"
-        )
-
-        # 获取AI配额状态
-        from fastapi_app.dependencies.quota_utils import get_quota_status
-
-        ai_quota_status = await get_quota_status(current_user, QuotaType.AI_SEARCH)
-
-        # 创建任务...
-        task_id = str(uuid.uuid4())
-
-        return APIResponse(
-            success=True,
-            message=f"AI搜索任务已创建 (等级: {user_role.value})",
-            data={
-                "task_id": task_id,
-                "user_level": user_role.value,
-                "task_priority": task_priority,
-                "max_concurrent_tasks": max_concurrent_tasks,
-                "estimated_duration": 30 if has_unlimited_ai else 60,
-                "quota_info": {
-                    "ai_search_quota": ai_quota_status,
-                    "remaining_ai_searches": ai_quota_status.get('remaining', 0),
-                },
-            },
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"创建异步搜索任务失败: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="创建搜索任务失败")
-        if not all([departure_code, destination_code, depart_date]):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail='缺少必需参数：出发机场代码、目的地机场代码、出发日期'
-            )
-
-        # 验证机场代码格式
-        if len(departure_code) != 3 or len(destination_code) != 3:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='机场代码必须是3位字母')
-
-        # 验证出发地和目的地不能相同
-        if departure_code.upper() == destination_code.upper():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='出发地和目的地不能相同')
-
-        # 获取AI增强航班搜索服务
-        flight_service = AIFlightService()
-
-        # 执行简化的AI增强搜索
-        result = await flight_service.search_flights_ai_enhanced(
-            departure_code=departure_code.upper(),
-            destination_code=destination_code.upper(),
-            depart_date=depart_date,
-            return_date=return_date,
-            adults=adults,
-            seat_class=seat_class.value,
-            children=children,
-            infants_in_seat=infants_in_seat,
-            infants_on_lap=infants_on_lap,
-            max_stops=max_stops.value,
-            sort_by=sort_by.value,
-            language=language,
-            currency=currency,
-            user_preferences=user_preferences,
-            is_guest_user=current_user is None,  # 关键：判断是否为游客用户
-        )
-
-        logger.info(f"AI增强搜索完成: 成功={result['success']}, 总结果数={result.get('total_count', 0)}")
-
-        # 添加AI处理信息到日志
-        ai_processing = result.get('ai_processing', {})
-        if ai_processing.get('success'):
-            logger.info("✅ AI数据处理成功")
-        else:
-            logger.warning(f"⚠️ AI数据处理失败: {ai_processing.get('error', 'Unknown error')}")
-
-        return result
-
-    except HTTPException:
-        # 重新抛出HTTP异常
-        raise
-    except Exception as e:
-        logger.error(f"AI增强航班搜索失败: {e}")
-        return {
-            'success': False,
-            'error': str(e),
-            'flights': [],
-            'search_stages': {},
-            'ai_processing': {'success': False, 'error': str(e)},
-            'message': str(e),
-            'total_count': 0,
-            'search_info': {
-                'source': 'ai_enhanced_comprehensive',
-                'search_time': '',
-                'departure_code': departure_code if 'departure_code' in locals() else 'N/A',
-                'destination_code': destination_code if 'destination_code' in locals() else 'N/A',
-                'depart_date': depart_date if 'depart_date' in locals() else 'N/A',
-                'processing_method': 'failed',
-            },
-        }
-
-
-# ==================== 异步搜索接口 ====================
-
-
-class AsyncTaskResponse(BaseModel):
-    """异步任务响应"""
-
-    task_id: str
-    status: str
-    message: str
-    estimated_duration: int | None = None
-
-
-class TaskStatusResponse(BaseModel):
-    """任务状态响应"""
-
-    task_id: str
-    status: str
-    progress: float
-    message: str
-    created_at: str
-    updated_at: str
-    estimated_duration: int | None = None
-
-
-@router.post("/search/ai-enhanced/async", response_model=APIResponse)
-async def start_ai_enhanced_search_async(
-    departure_code: str = Query(..., description="出发机场代码", min_length=3, max_length=3),
-    destination_code: str = Query(..., description="目的地机场代码", min_length=3, max_length=3),
-    depart_date: str = Query(..., description="出发日期(YYYY-MM-DD)"),
-    return_date: str | None = Query(None, description="返程日期(YYYY-MM-DD)"),
-    adults: int = Query(1, description="成人数量", ge=1, le=9),
-    children: int = Query(0, description="儿童数量", ge=0, le=8),
-    infants_in_seat: int = Query(0, description="婴儿占座数量", ge=0, le=8),
-    infants_on_lap: int = Query(0, description="婴儿怀抱数量", ge=0, le=8),
-    seat_class: SeatClass = Query(SeatClass.ECONOMY, description="座位等级"),
-    max_stops: MaxStops = Query(MaxStops.ANY, description="最大中转次数"),
-    sort_by: SortBy = Query(SortBy.CHEAPEST, description="排序方式"),
-    language: str = Query("zh", description="语言设置 (zh/en)"),
-    currency: str = Query("CNY", description="货币设置 (CNY/USD)"),
-    user_preferences: str = Query("", description="用户偏好和要求"),
-    current_user: UserInfo | None = Depends(get_current_user_optional),
+    task_service: AsyncTaskService = Depends(get_async_task_service),
 ):
     """
     异步AI增强航班搜索 - 提交任务
@@ -930,7 +756,14 @@ async def start_ai_enhanced_search_async(
         logger.info(f"用户 {user_display} 开始异步AI增强搜索: {departure_code} → {destination_code}")
 
         # 初始化异步任务服务
-        await async_task_service.initialize()
+        try:
+            await task_service.initialize()
+        except RuntimeError as exc:
+            logger.error(f"异步任务服务初始化失败: {exc}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="任务服务当前不可用，请稍后重试",
+            ) from exc
 
         # 准备搜索参数
         search_params = {
@@ -952,15 +785,45 @@ async def start_ai_enhanced_search_async(
         }
 
         # 创建异步任务
-        task_id = await async_task_service.create_task(
-            task_type="ai_flight_search", search_params=search_params, user_id=user_id
-        )
+        try:
+            task_id = await task_service.create_task(
+                task_type="ai_flight_search", search_params=search_params, user_id=user_id
+            )
+        except RuntimeError as exc:
+            logger.error(f"创建异步任务失败: {exc}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="任务服务当前不可用，请稍后重试",
+            ) from exc
 
         # 智能时间预估
         estimated_duration = _estimate_search_time(search_params)
 
         # 启动后台任务
-        asyncio.create_task(_execute_ai_search_background(task_id, search_params))
+        asyncio.create_task(_execute_ai_search_background(task_id, search_params, task_service))
+
+        # 确保任务信息已写入缓存后再响应，降低竞态风险
+        task_snapshot = None
+        confirmation_attempts = 3
+        confirmation_delay = 0.2
+
+        for attempt in range(1, confirmation_attempts + 1):
+            task_snapshot = await task_service.get_task_info(task_id)
+            if task_snapshot:
+                logger.debug(f"异步任务 {task_id} 已在缓存中确认 (尝试 {attempt})")
+                break
+            logger.debug(
+                f"异步任务 {task_id} 尚未在缓存中可用，重试 ({attempt}/{confirmation_attempts})"
+            )
+            await asyncio.sleep(confirmation_delay)
+
+        if task_snapshot is None:
+            logger.error(f"异步任务 {task_id} 在预期时间内未注册到缓存，取消任务创建")
+            await task_service.delete_task(task_id)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="任务服务当前不可用，请稍后重试",
+            )
 
         return APIResponse(
             success=True,
@@ -973,22 +836,35 @@ async def start_ai_enhanced_search_async(
             },
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"提交异步AI搜索任务失败: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"提交搜索任务失败: {str(e)}")
 
 
 @router.get("/task/{task_id}/status", response_model=APIResponse)
-async def get_task_status(task_id: str, current_user: UserInfo | None = Depends(get_current_user_optional)):
+async def get_task_status(
+    task_id: str,
+    current_user: UserInfo | None = Depends(get_current_user_optional),
+    task_service: AsyncTaskService = Depends(get_async_task_service),
+):
     """
     查询异步任务状态
     """
     try:
         # 初始化异步任务服务
-        await async_task_service.initialize()
+        try:
+            await task_service.initialize()
+        except RuntimeError as exc:
+            logger.error(f"任务服务初始化失败: {exc}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="任务服务当前不可用，请稍后重试",
+            ) from exc
 
         # 获取任务信息
-        task_info = await async_task_service.get_task_info(task_id)
+        task_info = await task_service.get_task_info(task_id)
         logger.info(f"🔍 查询任务信息: {task_id}, 结果: {task_info}")
 
         if not task_info:
@@ -1031,16 +907,27 @@ async def get_task_status(task_id: str, current_user: UserInfo | None = Depends(
 
 
 @router.get("/task/{task_id}/result", response_model=APIResponse)
-async def get_task_result(task_id: str, current_user: UserInfo | None = Depends(get_current_user_optional)):
+async def get_task_result(
+    task_id: str,
+    current_user: UserInfo | None = Depends(get_current_user_optional),
+    task_service: AsyncTaskService = Depends(get_async_task_service),
+):
     """
     获取异步任务结果
     """
     try:
         # 初始化异步任务服务
-        await async_task_service.initialize()
+        try:
+            await task_service.initialize()
+        except RuntimeError as exc:
+            logger.error(f"任务服务初始化失败: {exc}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="任务服务当前不可用，请稍后重试",
+            ) from exc
 
         # 获取任务信息
-        task_info = await async_task_service.get_task_info(task_id)
+        task_info = await task_service.get_task_info(task_id)
 
         if not task_info:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
@@ -1066,7 +953,7 @@ async def get_task_result(task_id: str, current_user: UserInfo | None = Depends(
             )
 
         # 获取任务结果
-        result = await async_task_service.get_task_result(task_id)
+        result = await task_service.get_task_result(task_id)
 
         if not result:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务结果不存在")
@@ -1142,15 +1029,30 @@ def _calculate_remaining_time(progress: float, estimated_total: int) -> int:
     return max(5, min(remaining_time, estimated_total))
 
 
-async def _execute_ai_search_background(task_id: str, search_params: dict[str, Any]):
+async def _execute_ai_search_background(
+    task_id: str, search_params: dict[str, Any], task_service: AsyncTaskService
+):
     """
     后台执行AI增强搜索 - 增强版进度报告
     """
     try:
         logger.info(f"开始执行后台AI搜索任务: {task_id}")
 
+        try:
+            await task_service.initialize()
+        except RuntimeError as exc:
+            logger.error(f"后台任务初始化失败: {exc}")
+            await task_service.update_task_status(
+                task_id,
+                TaskStatus.FAILED,
+                progress=0,
+                message="任务服务不可用，无法执行搜索",
+                error=str(exc),
+            )
+            return
+
         # 阶段0: 连接数据库 (0-25%)
-        await async_task_service.update_task_status(
+        await task_service.update_task_status(
             task_id,
             TaskStatus.PROCESSING,
             progress=0.05,
@@ -1160,7 +1062,7 @@ async def _execute_ai_search_background(task_id: str, search_params: dict[str, A
 
         await asyncio.sleep(0.5)  # 让前端看到进度变化
 
-        await async_task_service.update_task_status(
+        await task_service.update_task_status(
             task_id,
             TaskStatus.PROCESSING,
             progress=0.10,
@@ -1170,7 +1072,7 @@ async def _execute_ai_search_background(task_id: str, search_params: dict[str, A
 
         await asyncio.sleep(0.5)
 
-        await async_task_service.update_task_status(
+        await task_service.update_task_status(
             task_id,
             TaskStatus.PROCESSING,
             progress=0.20,
@@ -1182,7 +1084,7 @@ async def _execute_ai_search_background(task_id: str, search_params: dict[str, A
         flight_service = AIFlightService()
 
         # 阶段1: 搜索航班 (25-50%)
-        await async_task_service.update_task_status(
+        await task_service.update_task_status(
             task_id, TaskStatus.PROCESSING, progress=0.25, message="正在搜索航班...", stage=ProcessingStage.SEARCHING
         )
 
@@ -1195,19 +1097,19 @@ async def _execute_ai_search_background(task_id: str, search_params: dict[str, A
         ]
 
         for progress, message in search_stages:
-            await async_task_service.update_task_status(
+            await task_service.update_task_status(
                 task_id, TaskStatus.PROCESSING, progress=progress, message=message, stage=ProcessingStage.SEARCHING
             )
             await asyncio.sleep(0.3)  # 短暂延迟显示进度
 
         # 阶段2: 分析数据 (50-75%)
-        await async_task_service.update_task_status(
+        await task_service.update_task_status(
             task_id, TaskStatus.PROCESSING, progress=0.55, message="正在分析数据...", stage=ProcessingStage.AI_ANALYSIS
         )
 
         await asyncio.sleep(0.5)
 
-        await async_task_service.update_task_status(
+        await task_service.update_task_status(
             task_id,
             TaskStatus.PROCESSING,
             progress=0.65,
@@ -1235,13 +1137,13 @@ async def _execute_ai_search_background(task_id: str, search_params: dict[str, A
         )
 
         # 阶段3: 生成推荐 (75-100%)
-        await async_task_service.update_task_status(
+        await task_service.update_task_status(
             task_id, TaskStatus.PROCESSING, progress=0.80, message="正在生成推荐...", stage=ProcessingStage.FINALIZING
         )
 
         await asyncio.sleep(0.3)
 
-        await async_task_service.update_task_status(
+        await task_service.update_task_status(
             task_id,
             TaskStatus.PROCESSING,
             progress=0.90,
@@ -1251,7 +1153,7 @@ async def _execute_ai_search_background(task_id: str, search_params: dict[str, A
 
         await asyncio.sleep(0.2)
 
-        await async_task_service.update_task_status(
+        await task_service.update_task_status(
             task_id,
             TaskStatus.PROCESSING,
             progress=0.95,
@@ -1260,10 +1162,10 @@ async def _execute_ai_search_background(task_id: str, search_params: dict[str, A
         )
 
         # 保存搜索结果
-        await async_task_service.save_task_result(task_id, result)
+        await task_service.save_task_result(task_id, result)
 
         # 更新任务状态为完成
-        await async_task_service.update_task_status(
+        await task_service.update_task_status(
             task_id, TaskStatus.COMPLETED, progress=1.0, message="搜索完成", stage=ProcessingStage.FINALIZING
         )
 
@@ -1273,7 +1175,7 @@ async def _execute_ai_search_background(task_id: str, search_params: dict[str, A
         logger.error(f"后台AI搜索任务失败 {task_id}: {e}")
 
         # 更新任务状态为失败
-        await async_task_service.update_task_status(
+        await task_service.update_task_status(
             task_id, TaskStatus.FAILED, progress=0, message="搜索失败", error=str(e)
         )
 
@@ -1282,7 +1184,11 @@ async def _execute_ai_search_background(task_id: str, search_params: dict[str, A
 
 
 @router.get("/task/{task_id}/stream")
-async def stream_task_status(task_id: str, current_user: UserInfo | None = Depends(get_current_user_optional)):
+async def stream_task_status(
+    task_id: str,
+    current_user: UserInfo | None = Depends(get_current_user_optional),
+    task_service: AsyncTaskService = Depends(get_async_task_service),
+):
     """
     SSE实时推送任务状态
     支持游客访问，实时推送任务进度和结果
@@ -1293,20 +1199,46 @@ async def stream_task_status(task_id: str, current_user: UserInfo | None = Depen
         try:
             logger.info(f"🔄 开始SSE推送任务状态: {task_id}")
 
-            # 检查任务是否存在
-            task_info = await async_task_service.get_task_info(task_id)
+            try:
+                await task_service.initialize()
+            except RuntimeError as exc:
+                logger.error(f"SSE初始化失败: {exc}")
+                error_payload = {
+                    "status": "SERVICE_UNAVAILABLE",
+                    "message": "任务服务当前不可用，请稍后重试",
+                    "error_code": "SERVICE_UNAVAILABLE",
+                    "task_id": task_id,
+                    "final": True,
+                }
+                yield f"data: {json.dumps(error_payload, ensure_ascii=False)}\n\n"
+                yield f"event: error\ndata: {json.dumps({'error': 'SERVICE_UNAVAILABLE', 'final': True}, ensure_ascii=False)}\n\n"
+                yield f"event: close\ndata: {json.dumps({'message': '任务服务不可用，连接关闭', 'final': True}, ensure_ascii=False)}\n\n"
+                return
+
+            # 检查任务是否存在，加入短暂重试以处理缓存写入延迟
+            task_info = None
+            max_retries = 3
+            retry_delay = 0.5
+
+            for attempt in range(1, max_retries + 1):
+                task_info = await task_service.get_task_info(task_id)
+                if task_info:
+                    break
+                logger.warning(f"SSE任务 {task_id} 未找到，正在重试 ({attempt}/{max_retries})")
+                await asyncio.sleep(retry_delay)
+
             if not task_info:
-                # 发送错误事件并立即关闭连接
-                error_data = {
+                error_payload = {
                     "status": "TASK_NOT_FOUND",
                     "message": "任务不存在或已过期",
                     "error_code": "TASK_NOT_FOUND",
                     "task_id": task_id,
-                    "final": True,  # 明确标记这是最终消息
+                    "final": True,
                 }
                 logger.warning(f"⚠️ SSE任务不存在: {task_id}")
-                yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
-                # 发送明确的终止事件
+
+                # 明确向前端发送最终错误事件，并随后终止生成器
+                yield f"data: {json.dumps(error_payload, ensure_ascii=False)}\n\n"
                 yield f"event: error\ndata: {json.dumps({'error': 'TASK_NOT_FOUND', 'final': True}, ensure_ascii=False)}\n\n"
                 yield f"event: close\ndata: {json.dumps({'message': '任务不存在，连接关闭', 'final': True}, ensure_ascii=False)}\n\n"
                 return
@@ -1367,7 +1299,7 @@ async def stream_task_status(task_id: str, current_user: UserInfo | None = Depen
             # 如果任务已完成，发送结果并结束
             if initial_status == "COMPLETED":
                 try:
-                    result = await async_task_service.get_task_result(task_id)
+                    result = await task_service.get_task_result(task_id)
                     if result:
                         # 简化：直接发送后端原始数据结构，让前端处理
                         result_data = {
@@ -1425,7 +1357,7 @@ async def stream_task_status(task_id: str, current_user: UserInfo | None = Depen
                         break
 
                     # 获取最新任务状态
-                    current_task_info = await async_task_service.get_task_info(task_id)
+                    current_task_info = await task_service.get_task_info(task_id)
                     if not current_task_info:
                         # 任务在轮询过程中被删除
                         error_data = {
@@ -1485,7 +1417,7 @@ async def stream_task_status(task_id: str, current_user: UserInfo | None = Depen
                     # 如果任务完成，发送结果并结束
                     if current_status == "COMPLETED":
                         try:
-                            result = await async_task_service.get_task_result(task_id)
+                            result = await task_service.get_task_result(task_id)
                             if result:
                                 # 简化：直接发送后端原始数据结构，让前端处理
                                 result_data = {
@@ -1533,12 +1465,17 @@ async def stream_task_status(task_id: str, current_user: UserInfo | None = Depen
                     yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
                     break
 
-            logger.info(f"🔚 SSE推送结束: {task_id}")
-
+        except asyncio.CancelledError:
+            logger.info(f"🔚 SSE推送被客户端取消: {task_id}")
+            return
         except Exception as e:
             logger.error(f"❌ SSE流生成失败: {e}")
-            error_data = {"status": "ERROR", "message": f"服务器内部错误: {str(e)}", "task_id": task_id}
+            error_data = {"status": "ERROR", "message": f"服务器内部错误: {str(e)}", "task_id": task_id, "final": True}
             yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+            yield f"event: error\ndata: {json.dumps({'error': 'INTERNAL_ERROR', 'final': True}, ensure_ascii=False)}\n\n"
+            yield f"event: close\ndata: {json.dumps({'message': '服务器错误，连接关闭', 'final': True}, ensure_ascii=False)}\n\n"
+        finally:
+            logger.info(f"🔚 SSE推送结束: {task_id}")
 
     # 返回SSE响应
     return StreamingResponse(
@@ -1552,3 +1489,4 @@ async def stream_task_status(task_id: str, current_user: UserInfo | None = Depen
             "Access-Control-Expose-Headers": "*",
         },
     )
+

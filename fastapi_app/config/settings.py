@@ -24,12 +24,21 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 SUPABASE_DATABASE_URL = os.getenv("SUPABASE_DATABASE_URL")
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
 
+# JWT/JWKS 校验（可选，推荐启用 JWKS）
+SUPABASE_JWKS_URL = os.getenv("SUPABASE_JWKS_URL")  # 例如：https://<project>.supabase.co/auth/v1/certs
+SUPABASE_JWT_ISSUER = os.getenv("SUPABASE_JWT_ISSUER")  # 例如：https://<project>.supabase.co/auth/v1
+SUPABASE_JWT_AUDIENCE = os.getenv("SUPABASE_JWT_AUDIENCE")  # 例如：authenticated
+JWT_VERIFY_ISSUER = os.getenv("JWT_VERIFY_ISSUER", "false").lower() == "true"
+JWT_VERIFY_AUDIENCE = os.getenv("JWT_VERIFY_AUDIENCE", "false").lower() == "true"
+SUPABASE_JWKS_TTL_SECONDS = int(os.getenv("SUPABASE_JWKS_TTL_SECONDS", "900"))
+
 # Redis 缓存配置
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 # AI 服务配置
 AI_API_KEY = os.getenv("AI_API_KEY")
 AI_API_URL = os.getenv("AI_API_URL", "http://154.19.184.12:3000/v1")
+AI_MODEL = os.getenv("AI_MODEL", "gemini-1.5-flash")
 AI_MODEL_AUTHENTICATED = os.getenv("AI_MODEL_AUTHENTICATED", "gemini-2.5-pro")
 
 # 数据保存配置（默认关闭）
@@ -133,10 +142,17 @@ class Settings:
         self.SUPABASE_SERVICE_ROLE_KEY = SUPABASE_SERVICE_ROLE_KEY
         self.SUPABASE_DATABASE_URL = SUPABASE_DATABASE_URL
         self.SUPABASE_JWT_SECRET = SUPABASE_JWT_SECRET
+        self.SUPABASE_JWKS_URL = SUPABASE_JWKS_URL
+        self.SUPABASE_JWT_ISSUER = SUPABASE_JWT_ISSUER
+        self.SUPABASE_JWT_AUDIENCE = SUPABASE_JWT_AUDIENCE
+        self.JWT_VERIFY_ISSUER = JWT_VERIFY_ISSUER
+        self.JWT_VERIFY_AUDIENCE = JWT_VERIFY_AUDIENCE
+        self.SUPABASE_JWKS_TTL_SECONDS = SUPABASE_JWKS_TTL_SECONDS
 
         # AI配置
         self.AI_API_KEY = AI_API_KEY
         self.AI_API_URL = AI_API_URL
+        self.AI_MODEL = AI_MODEL
         self.AI_MODEL_AUTHENTICATED = AI_MODEL_AUTHENTICATED
 
         # 数据保存配置

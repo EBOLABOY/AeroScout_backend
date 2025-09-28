@@ -2061,8 +2061,10 @@ You must strictly follow this key principle: The most successful Skiplagging opp
             # 简单的价格分析
             prices = []
             for flight in all_flights:
-                if flight.get('price') and flight['price'].get('amount'):
-                    prices.append(flight['price']['amount'])
+                if isinstance(flight, dict):
+                    price_info = flight.get('price')
+                    if isinstance(price_info, dict) and price_info.get('amount'):
+                        prices.append(price_info['amount'])
 
             min_price = min(prices) if prices else 0
             avg_price = sum(prices) / len(prices) if prices else 0
