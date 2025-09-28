@@ -2,17 +2,16 @@
 认证依赖：使用 Authlib + JWKS/HS256 本地校验 Supabase JWT
 """
 
-from datetime import datetime
 import json
+from datetime import datetime
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
 
-from fastapi_app.config import settings
 from fastapi_app.models.auth import UserInfo
-from fastapi_app.services.supabase_service import get_supabase_service
 from fastapi_app.security.jwt import verify_jwt_and_get_claims
+from fastapi_app.services.supabase_service import get_supabase_service
 
 security = HTTPBearer()
 optional_security = HTTPBearer(auto_error=False)

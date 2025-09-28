@@ -7,9 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from fastapi_app.dependencies.auth import get_current_active_user
 from fastapi_app.dependencies.permissions import (
-    get_user_permissions_info,
     Permission,
     PermissionChecker,
+    get_user_permissions_info,
 )
 from fastapi_app.models.auth import UserInfo
 from fastapi_app.models.common import APIResponse

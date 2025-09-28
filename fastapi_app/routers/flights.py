@@ -4,7 +4,6 @@ FastAPI航班路由
 
 import asyncio
 import json
-import uuid
 from datetime import datetime
 from typing import Any
 
