@@ -64,6 +64,10 @@ class CacheService:
             await self.redis.close()
             logger.info("Redis连接已关闭")
 
+    def is_connected(self) -> bool:
+        """当前是否已连接Redis"""
+        return self.redis is not None
+
     def _serialize_value(self, value: Any) -> str:
         """序列化值"""
         if isinstance(value, dict | list):
@@ -125,7 +129,12 @@ class CacheService:
             logger.warning(f"反序列化失败 {value}: {e}")
             return value
 
-    async def get(self, key: str, value_type: type = None) -> Any:
+    async def get(
+        self,
+        key: str,
+        value_type: type = None,
+        require_redis: bool = False,
+    ) -> Any:
         """获取缓存值"""
         if self.redis:
             try:
@@ -135,7 +144,12 @@ class CacheService:
                 return self._deserialize_value(value, value_type)
             except Exception as e:
                 logger.error(f"Redis获取缓存失败 {key}: {e}")
+                if require_redis:
+                    return None
                 # Redis失败时降级到内存缓存
+        elif require_redis:
+            logger.error(f"Redis未连接，无法获取关键数据: {key}")
+            return None
 
         # 使用内存缓存（Redis不可用或失败时）
         async with self._memory_cache_lock:
@@ -143,43 +157,48 @@ class CacheService:
                 entry = self._memory_cache[key]
                 if not self._is_memory_cache_expired(entry):
                     return self._deserialize_value(entry['value'], value_type)
-                else:
-                    # 删除过期项
-                    del self._memory_cache[key]
+                # 删除过期项
+                del self._memory_cache[key]
             return None
 
     async def set(
-        self, key: str, value: Any, expire: int | None = None, expire_timedelta: timedelta | None = None
+        self,
+        key: str,
+        value: Any,
+        expire: int | None = None,
+        expire_timedelta: timedelta | None = None,
+        require_redis: bool = False,
     ) -> bool:
         """设置缓存值"""
+        expire_seconds = expire
+        if expire_timedelta:
+            expire_seconds = int(expire_timedelta.total_seconds())
+
+        serialized_value = self._serialize_value(value)
+
         if self.redis:
             try:
-                serialized_value = self._serialize_value(value)
-
-                if expire_timedelta:
-                    expire = int(expire_timedelta.total_seconds())
-
-                if expire:
-                    await self.redis.setex(key, expire, serialized_value)
+                if expire_seconds:
+                    await self.redis.setex(key, expire_seconds, serialized_value)
                 else:
                     await self.redis.set(key, serialized_value)
 
                 return True
             except Exception as e:
                 logger.error(f"Redis设置缓存失败 {key}: {e}")
+                if require_redis:
+                    return False
                 # Redis失败时降级到内存缓存
+        elif require_redis:
+            logger.error(f"Redis未连接，无法保存关键数据: {key}")
+            return False
 
         # 使用内存缓存（Redis不可用或失败时）
         try:
-            serialized_value = self._serialize_value(value)
-
-            if expire_timedelta:
-                expire = int(expire_timedelta.total_seconds())
-
             cache_entry = {'value': serialized_value, 'created_at': datetime.now().isoformat()}
 
-            if expire:
-                expire_at = datetime.now() + timedelta(seconds=expire)
+            if expire_seconds:
+                expire_at = datetime.now() + timedelta(seconds=expire_seconds)
                 cache_entry['expire_at'] = expire_at.isoformat()
 
             async with self._memory_cache_lock:
@@ -194,7 +213,7 @@ class CacheService:
             logger.error(f"内存缓存设置失败 {key}: {e}")
             return False
 
-    async def delete(self, key: str) -> bool:
+    async def delete(self, key: str, require_redis: bool = False) -> bool:
         """删除缓存"""
         redis_success = False
         memory_success = False
@@ -205,6 +224,11 @@ class CacheService:
                 redis_success = result > 0
             except Exception as e:
                 logger.error(f"Redis删除缓存失败 {key}: {e}")
+                if require_redis:
+                    return False
+        elif require_redis:
+            logger.error(f"Redis未连接，无法删除关键数据: {key}")
+            return False
 
         # 同时删除内存缓存
         async with self._memory_cache_lock:

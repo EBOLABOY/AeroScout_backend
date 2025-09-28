@@ -1,10 +1,10 @@
 """
-认证依赖：切换为被动验证 Supabase JWT
+认证依赖：使用 Authlib + JWKS/HS256 本地校验 Supabase JWT
 """
 
 from datetime import datetime
+import json
 
-import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
@@ -12,6 +12,7 @@ from loguru import logger
 from fastapi_app.config import settings
 from fastapi_app.models.auth import UserInfo
 from fastapi_app.services.supabase_service import get_supabase_service
+from fastapi_app.security.jwt import verify_jwt_and_get_claims
 
 security = HTTPBearer()
 optional_security = HTTPBearer(auto_error=False)
@@ -19,35 +20,27 @@ optional_security = HTTPBearer(auto_error=False)
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> UserInfo:
     token = credentials.credentials
-    supabase_jwt_secret = settings.SUPABASE_JWT_SECRET
-    if not supabase_jwt_secret:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="服务器未配置JWT验证密钥",
-        )
-
-    user_id = None
-    email = None
-    # 优先用 Supabase JWT 解码
-    try:
-        payload = jwt.decode(token, supabase_jwt_secret, algorithms=["HS256"])
-        user_id = payload.get("sub")
-        email = payload.get("email")
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token已过期")
-    except jwt.InvalidTokenError:
-        # 向后兼容：尝试旧JWT
+    # 基本校验，避免非字符串/空/占位符导致的解码异常
+    if not isinstance(token, str):
+        logger.warning(f"无效的Authorization类型: {type(token)}")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的认证令牌")
+    token = token.strip()
+    if not token or token.lower() in {"null", "undefined", "none"}:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的认证令牌")
+    # 兼容某些前端误传JSON对象字符串的情况：{"access_token":"..."}
+    if token.startswith("{") and token.endswith("}"):
         try:
-            legacy = jwt.decode(
-                token,
-                getattr(settings, "JWT_SECRET_KEY", None),
-                algorithms=[getattr(settings, "JWT_ALGORITHM", "HS256")],
-            )
-            user_id = legacy.get("user_id")
-        except Exception as e:
-            logger.warning(f"JWT解码失败: {e}")
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的认证令牌")
-
+            obj = json.loads(token)
+            possible = obj.get("access_token") or obj.get("token")
+            if isinstance(possible, str) and possible:
+                token = possible
+        except Exception:
+            pass
+    claims = await verify_jwt_and_get_claims(token)
+    if not claims:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的认证令牌")
+    user_id = claims.get("sub") or claims.get("user_id")
+    email = claims.get("email")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="令牌缺少用户标识")
 

@@ -187,11 +187,9 @@ def require_permission(permission: Permission) -> Callable:
     依赖注入函数生成器，用于要求特定权限
     """
 
-    async def _require_permission(current_user: UserInfo = None) -> UserInfo:
-        # 延迟导入避免循环依赖
+    async def _require_permission(current_user: UserInfo | None = None) -> UserInfo:
+        # 注意：该依赖不主动拉取 current_user，需在路由中显式依赖认证
         if current_user is None:
-            # 这里需要手动获取当前用户，但这样会破坏依赖注入
-            # 更好的方法是在路由层面处理权限检查
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="需要认证")
 
         if not PermissionChecker.has_permission(current_user, permission):
@@ -211,7 +209,7 @@ require_travel_plan_permission = require_permission(Permission.TRAVEL_PLAN_CREAT
 require_system_admin_permission = require_permission(Permission.SYSTEM_ADMIN)
 
 
-# 权限信息获取函数
+# 权限信息获取函数（由路由层注入 current_user 后调用）
 async def get_user_permissions_info(current_user: UserInfo) -> dict:
     """获取用户权限信息"""
     role = PermissionChecker.get_user_role(current_user)
