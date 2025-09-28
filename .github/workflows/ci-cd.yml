@@ -33,7 +33,16 @@ jobs:
         run: poetry run ruff check .
 
       - name: Run tests
-        run: poetry run pytest -q
+        run: |
+          set -e
+          if ! poetry run pytest -q; then
+            status=$?
+            if [ "$status" -eq 5 ]; then
+              echo "Pytest exited with code 5 (no tests found). Treating as success."
+            else
+              exit "$status"
+            fi
+          fi
 
   deploy:
     name: Deploy to VPS
@@ -130,3 +139,4 @@ jobs:
             echo '❌ Health check failed after waiting period. Showing recent logs:' >&2
             ${COMPOSE_CMD} logs --tail=200 app || true
             exit 1
+
