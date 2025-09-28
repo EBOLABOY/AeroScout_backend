@@ -2,14 +2,15 @@ name: CI-CD
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["master"]
+  workflow_dispatch:
 
 concurrency:
   group: ci-cd-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  ci:
+  quality:
     name: Lint & Test
     runs-on: ubuntu-latest
     steps:
@@ -19,175 +20,113 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.12'
 
-      - name: Install tools
-        run: |
-          python -m pip install --upgrade pip
-          pip install ruff pytest
-
-      - name: Ruff check
-        run: ruff check .
-
-      - name: Run tests
-        run: pytest -q
-
-  build:
-    name: Build & Push Image
-    runs-on: ubuntu-latest
-    needs: [ci]
-    env:
-      IMAGE_REPO: ghcr.io/${{ github.repository }}
-    outputs:
-      image: ${{ steps.meta.outputs.image }}
-      short_sha: ${{ steps.meta.outputs.short_sha }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU (multi-arch)
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install Poetry
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install poetry
+          poetry config virtualenvs.create false
+          poetry install --no-interaction --no-root
 
-      - name: Export lockfile
-        run: poetry export -f requirements.txt -o requirements.lock.txt --without-hashes
+      - name: Ruff check
+        run: poetry run ruff check .
 
-      - name: Compute image tag
-        id: meta
-        run: |
-          SHORT_SHA=${GITHUB_SHA::7}
-          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          echo "image=${IMAGE_REPO}:sha-$SHORT_SHA" >> $GITHUB_OUTPUT
-
-      - name: Build & push (sha tag)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.image }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build & push (latest on main)
-        if: github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ env.IMAGE_REPO }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Run tests
+        run: poetry run pytest -q
 
   deploy:
-    name: Deploy to Production
+    name: Deploy to VPS
     runs-on: ubuntu-latest
-    needs: [build]
+    needs: quality
+    if: github.ref == 'refs/heads/master'
     steps:
-      - name: Checkout (for migration files)
-        uses: actions/checkout@v4
-
-      - name: Deploy to Server and Verify Health
+      - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
         env:
-          APP_IMAGE: ${{ needs.build.outputs.image }}
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-          GHCR_PAT: ${{ secrets.GHCR_PAT }}
-          GHCR_ACTOR: ${{ github.actor }}
+          BRANCH: master
           DEPLOY_DIR: /opt/aeroscout
-          PROJECT_PATH: ${{ vars.SERVER_PROJECT_PATH_OVERRIDE }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: APP_IMAGE,REPO_URL,SUPABASE_ACCESS_TOKEN,SUPABASE_DB_URL,GHCR_PAT,GHCR_ACTOR,DEPLOY_DIR,PROJECT_PATH
+          envs: REPO_URL,BRANCH,DEPLOY_DIR,SUPABASE_ACCESS_TOKEN,SUPABASE_DB_PASSWORD,SUPABASE_JWT_SECRET
           script: |
             set -euo pipefail
-            PROJECT_PATH="${PROJECT_PATH:-${DEPLOY_DIR}}"
-            echo "[Deploy] Using project path: ${PROJECT_PATH}"
-            if [ ! -d "${PROJECT_PATH}" ]; then sudo mkdir -p "${PROJECT_PATH}"; fi
-            sudo chown -R "$USER":"$USER" "${PROJECT_PATH}"
-            cd "${PROJECT_PATH}" || (git clone "${REPO_URL}" "${PROJECT_PATH}" && cd "${PROJECT_PATH}")
-            git pull --ff-only || true
 
-            echo "[Deploy] Install Node & Supabase CLI if missing"
-            if ! command -v node >/dev/null 2>&1; then
-              curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-              sudo apt-get install -y nodejs
-            fi
-            if ! command -v supabase >/dev/null 2>&1; then
-              npm install -g supabase
+            DOCKER="docker"
+            if ! docker info >/dev/null 2>&1; then
+              if sudo -n docker info >/dev/null 2>&1; then
+                DOCKER="sudo docker"
+              else
+                echo 'Docker daemon is not reachable. Please ensure docker is installed and accessible.' >&2
+                exit 1
+              fi
             fi
 
-            echo "[Deploy] Apply database migrations via Supabase CLI (non-interactive using DB URL env)"
-            export SUPABASE_ACCESS_TOKEN="${SUPABASE_ACCESS_TOKEN}"
-            export SUPABASE_DB_URL="${SUPABASE_DB_URL}"
-            if [ -z "${SUPABASE_DB_URL:-}" ]; then
-              echo "SUPABASE_DB_URL is not set. Please add it to GitHub Secrets." >&2
+            if ${DOCKER} compose version >/dev/null 2>&1; then
+              COMPOSE_CMD="${DOCKER} compose"
+            elif command -v docker-compose >/dev/null 2>&1; then
+              COMPOSE_CMD="docker-compose"
+            elif command -v sudo >/dev/null 2>&1 && sudo -n docker-compose version >/dev/null 2>&1; then
+              COMPOSE_CMD="sudo docker-compose"
+            else
+              echo 'Docker Compose is not available on the server.' >&2
               exit 1
             fi
-            npx supabase db push
 
-            echo "[Deploy] Docker login (GHCR)"
-            if [ -n "${GHCR_PAT:-}" ]; then
-              echo "${GHCR_PAT}" | docker login ghcr.io -u "${GHCR_ACTOR}" --password-stdin
-            else
-              echo "GHCR_PAT not set; assuming public image pull is allowed."
+            echo "[Deploy] Using compose command: ${COMPOSE_CMD}"
+
+            echo "[Deploy] Ensuring deploy directory ${DEPLOY_DIR}"
+            if [ ! -d "${DEPLOY_DIR}" ]; then
+              sudo mkdir -p "${DEPLOY_DIR}"
+              sudo chown -R "$USER":"$USER" "${DEPLOY_DIR}"
             fi
 
-            echo "[Deploy] Pull and restart services with new image ${APP_IMAGE}"
-            APP_IMAGE="${APP_IMAGE}" docker compose -f docker-compose.yml -f docker-compose.prod.yml pull app
-            APP_IMAGE="${APP_IMAGE}" docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+            if [ ! -d "${DEPLOY_DIR}/.git" ]; then
+              git clone --branch "${BRANCH}" "${REPO_URL}" "${DEPLOY_DIR}"
+            fi
 
-            echo "[Deploy] Waiting for application to become healthy (internal check)..."
-            i=1
-            while [ $i -le 15 ]; do
-              if docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T app curl -sf http://localhost:8000/health >/dev/null 2>&1 && \
-                 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T app curl -sf 'http://localhost:8000/api/flights/airports/search?q=pek' >/dev/null 2>&1; then
-                echo "✅ Internal health and core API checks passed!"
-                break
+            cd "${DEPLOY_DIR}"
+            git fetch origin "${BRANCH}"
+            git checkout "${BRANCH}"
+            git reset --hard "origin/${BRANCH}"
+
+            touch .env
+
+            update_env_var() {
+              local key="$1"
+              local value="$2"
+              if [ -z "${value}" ]; then
+                return
               fi
-              echo "Waiting for internal checks... attempt ($i/15)"
-              i=$((i+1))
-              sleep 2
+              local escaped
+              escaped=$(printf '%s\n' "${value}" | sed -e 's/[\\/&]/\\&/g')
+              if grep -q "^${key}=" .env; then
+                sed -i "s|^${key}=.*|${key}=${escaped}|" .env
+              else
+                printf '%s=%s\n' "${key}" "${value}" >> .env
+              fi
+            }
+
+            update_env_var "SUPABASE_ACCESS_TOKEN" "${SUPABASE_ACCESS_TOKEN:-}"
+            update_env_var "SUPABASE_DB_PASSWORD" "${SUPABASE_DB_PASSWORD:-}"
+            update_env_var "SUPABASE_JWT_SECRET" "${SUPABASE_JWT_SECRET:-}"
+
+            ${COMPOSE_CMD} pull
+            ${COMPOSE_CMD} up -d --build
+
+            echo "[Deploy] Waiting for application health..."
+            for attempt in $(seq 1 15); do
+              if ${COMPOSE_CMD} exec -T app curl -sf http://localhost:8000/health >/dev/null 2>&1; then
+                echo '✅ Application is healthy.'
+                exit 0
+              fi
+              echo "Waiting for health check (${attempt}/15)..."
+              sleep 4
             done
 
-            if [ $i -eq 15 ]; then
-              echo "❌ Internal health or core API check failed after 30 seconds."
-              echo "Displaying last 200 lines of application logs:"
-              docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --no-color --tail=200 app || true
-              exit 1
-            fi
-
-            echo "[Deploy] Performing end-to-end health check via Nginx..."
-            if curl -sf --resolve apiticketradar.izlx.de:443:127.0.0.1 https://apiticketradar.izlx.de/health >/dev/null 2>&1; then
-              echo "✅ End-to-end health check passed!"
-            else
-              echo "❌ End-to-end health check via Nginx failed! Displaying Nginx logs..."
-              docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --no-color --tail=50 nginx || true
-              exit 1
-            fi
-
-            echo "🎉 Deployment successful and service is healthy!"
+            echo '❌ Health check failed after waiting period. Showing recent logs:' >&2
+            ${COMPOSE_CMD} logs --tail=200 app || true
+            exit 1
