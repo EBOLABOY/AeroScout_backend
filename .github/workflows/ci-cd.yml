@@ -123,6 +123,12 @@ jobs:
             update_env_var "SUPABASE_DB_PASSWORD" "${SUPABASE_DB_PASSWORD:-}"
             update_env_var "SUPABASE_JWT_SECRET" "${SUPABASE_JWT_SECRET:-}"
 
+            echo "[Deploy] Stop and clean existing containers (avoid name conflicts)"
+            # Try a graceful compose down first (ignore failures)
+            ${COMPOSE_CMD} down --remove-orphans || true
+            # Remove explicitly named containers if they still exist (ignore failures)
+            ${DOCKER} rm -f ticketradar-app ticketradar-redis ticketradar-nginx || true
+
             ${COMPOSE_CMD} pull
             ${COMPOSE_CMD} up -d --build
 
