@@ -52,15 +52,10 @@ jobs:
     steps:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
-        env:
-          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
-          BRANCH: master
-          DEPLOY_DIR: /opt/aeroscout
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: REPO_URL,BRANCH,DEPLOY_DIR,SUPABASE_ACCESS_TOKEN,SUPABASE_DB_PASSWORD,SUPABASE_JWT_SECRET
           script: |
             set -euo pipefail
 
@@ -87,6 +82,11 @@ jobs:
 
             echo "[Deploy] Using compose command: ${COMPOSE_CMD}"
 
+            # Server-managed deployment directory and env
+            DEPLOY_DIR="/opt/aeroscout"
+            REPO_URL="${{ github.server_url }}/${{ github.repository }}.git"
+            BRANCH="master"
+
             echo "[Deploy] Ensuring deploy directory ${DEPLOY_DIR}"
             if [ ! -d "${DEPLOY_DIR}" ]; then
               sudo mkdir -p "${DEPLOY_DIR}"
@@ -101,27 +101,6 @@ jobs:
             git fetch origin "${BRANCH}"
             git checkout "${BRANCH}"
             git reset --hard "origin/${BRANCH}"
-
-            touch .env
-
-            update_env_var() {
-              local key="$1"
-              local value="$2"
-              if [ -z "${value}" ]; then
-                return
-              fi
-              local escaped
-              escaped=$(printf '%s\n' "${value}" | sed -e 's/[\\/&]/\\&/g')
-              if grep -q "^${key}=" .env; then
-                sed -i "s|^${key}=.*|${key}=${escaped}|" .env
-              else
-                printf '%s=%s\n' "${key}" "${value}" >> .env
-              fi
-            }
-
-            update_env_var "SUPABASE_ACCESS_TOKEN" "${SUPABASE_ACCESS_TOKEN:-}"
-            update_env_var "SUPABASE_DB_PASSWORD" "${SUPABASE_DB_PASSWORD:-}"
-            update_env_var "SUPABASE_JWT_SECRET" "${SUPABASE_JWT_SECRET:-}"
 
             echo "[Deploy] Stop and clean existing containers (avoid name conflicts)"
             # Try a graceful compose down first (ignore failures)
